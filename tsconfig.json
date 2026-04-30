@@ -7,5 +7,6 @@
     "typeRoots": ["./node_modules/@types", "./node_modules/@figma"],
     "strictNullChecks": true
   },
-  "rootDir": "."
+  "rootDir": ".",
+  "exclude": ["node_modules", "**/*.test.ts", "vitest.config.ts"]
 }

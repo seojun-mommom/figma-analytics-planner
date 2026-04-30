@@ -21,7 +21,7 @@
     "@amplitude/eslint-config-typescript": "^1.1.0",
     "@create-figma-plugin/build": "0.0.81",
     "@create-figma-plugin/tsconfig": "0.0.81",
-    "@figma/plugin-typings": "^1.19.0",
+    "@figma/plugin-typings": "^1.125.0",
     "@types/amplitude-js": "^7.0.0",
     "@types/axios": "^0.14.0",
     "@typescript-eslint/eslint-plugin": "4",
@@ -33,16 +33,22 @@
     "eslint-plugin-promise": "4",
     "eslint-plugin-standard": "4",
     "husky": ">=4",
-    "lint-staged": ">=10"
+    "lint-staged": ">=10",
+    "vitest": "^3.1.0"
   },
   "scripts": {
-    "build": "build-figma-plugin",
-    "watch": "build-figma-plugin --watch",
+    "build": "NODE_OPTIONS=--openssl-legacy-provider build-figma-plugin",
+    "postbuild": "node -e \"const fs=require('fs');const m=JSON.parse(fs.readFileSync('manifest.json','utf8'));m.editorType=['figma'];fs.writeFileSync('manifest.json',JSON.stringify(m,null,2)+'\\n');\"",
+    "watch": "NODE_OPTIONS=--openssl-legacy-provider build-figma-plugin --watch",
+    "test": "vitest run",
     "lint": "eslint --cache --fix"
   },
   "figma-plugin": {
     "id": "921207224854227439",
-    "name": "Amplitude Event Planner",
+    "name": "Amplitude Event Mapper",
+    "editorType": [
+      "figma"
+    ],
     "menu": [
       {
         "name": "Create Event Label",

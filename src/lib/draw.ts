@@ -1,70 +1,77 @@
 import { COLORS } from 'src/lib/color';
-import { EventMetadata, NodeMarker } from 'src/types/event';
+import { EventMetadata, EventProperty, NodeMarker } from 'src/types/event';
 
-const OFFSET_X = 24;
-const OFFSET_Y = 16;
-const PADDING_HORIZONTAL = 18;
-const PADDING_VERTICAL = 16;
+const PADDING_HORIZONTAL = 10;
+const PADDING_VERTICAL = 6;
+// All visible inter-section gaps inside the card use this same value to keep
+// the layout tight. createDetailFrame uses DETAIL_INNER_GAP for label↔value.
+const SECTION_GAP = 4;
+const DETAIL_INNER_GAP = 2;
+const PROPERTIES_GAP = 2;
+const LABEL_FONT_SIZE = 10;
+const VALUE_FONT_SIZE = 12;
+const REQUIRED_PAINT: readonly SolidPaint[] = [{
+  blendMode: 'NORMAL',
+  color: { r: 217 / 255, g: 80 / 255, b: 80 / 255 },
+  opacity: 1,
+  type: 'SOLID',
+  visible: true,
+}];
 
-function addDropShadow(label: FrameNode): void {
-  const shadow: ShadowEffect = {
-    blendMode: 'NORMAL',
-    color: { r: 0, g: 0, b: 0, a: 0.35 },
-    offset: { x: 7, y: 7 },
-    radius: 4,
-    spread: 0,
-    type: 'DROP_SHADOW',
-    visible: true,
-  };
-  label.effects = [shadow];
-}
+// Card dimensions. Cards have a fixed width on canvas — collapsed cards use
+// ellipsis on the name when it overflows, expanded cards keep the same width
+// and grow vertically. CARD_HEIGHT_COLLAPSED is a conservative estimate used
+// only to seed the vertical-stacking placement when a node has multiple
+// mappings; actual card heights are read back from the canvas.
+const CARD_WIDTH = 240;
+const CARD_WIDTH_MINIMIZED = 220;
+const CARD_HEIGHT_COLLAPSED = 32;
+const CARD_HEIGHT_EXPANDED = 420;
+const CARD_CORNER_RADIUS = 6;
+const CARD_STROKE_REGULAR = 1;
+const CARD_STROKE_LEFT_ACCENT = 3;
 
-const BRACKET_PADDING = 12;
-const BRACKET_WIDTH = 16;
+const LOGO_SIZE = 14;
+const MOMMOM_LOGO_SVG = `<svg width="130" height="130" viewBox="0 0 130 130" xmlns="http://www.w3.org/2000/svg">
+<path d="M121.32 66.3459C110.954 40.7814 88.4211 40.776 79.8959 18.1565C70.3105 -7.27613 30.3842 -4.9001 20.5474 18.4843C14.3772 33.1527 7.34946 46.1576 6.32906 65.2708C4.6085 97.4998 28.0776 124.286 59.8919 129.178C94.7538 134.539 137.186 105.475 121.32 66.3459Z" fill="url(#paint0_linear_4684_2169)"/>
+<path d="M38.5986 87.1858C8.80869 72.3691 29.6095 42.7054 45.9482 61.8388C48.2307 64.5116 49.5219 65.685 53.6848 65.1251C62.4623 63.9443 71.5965 70.1217 66.5899 80.8152C63.0674 88.3389 47.7694 90.5872 38.5986 87.1858Z" fill="#FFAB86" fill-opacity="0.6"/>
+<path d="M49.1748 34.5413C48.8996 33.8786 49.7477 33.3278 50.2793 33.824C57.769 40.8397 64.1823 36.8248 67.2021 34.0017C67.7296 33.5088 68.5869 34.0732 68.3003 34.7253C66.729 38.301 63.0535 40.8127 58.7725 40.8127C54.4199 40.8116 50.6993 38.2135 49.1748 34.5413Z" fill="#3C2D25"/>
+<path d="M50.6982 21.573C51.7289 21.5732 52.5645 23.5049 52.5645 25.8831C52.5641 28.2606 51.7288 30.1865 50.6982 30.1868C49.6675 30.1868 48.8323 28.2608 48.832 25.8831C48.832 23.5047 49.6673 21.573 50.6982 21.573Z" fill="#3C2D25"/>
+<path d="M66.2056 21.573C67.2355 21.5756 68.0718 23.5064 68.0718 25.8831C68.0715 28.2592 67.2353 30.1841 66.2056 30.1868C65.175 30.1868 64.3397 28.2608 64.3394 25.8831C64.3394 23.5047 65.1748 21.573 66.2056 21.573Z" fill="#3C2D25"/>
+<defs>
+<linearGradient id="paint0_linear_4684_2169" x1="65.4936" y1="48.4758" x2="65.4936" y2="129.817" gradientUnits="userSpaceOnUse">
+<stop stop-color="#FF773D"/>
+<stop offset="1" stop-color="#E1561B"/>
+</linearGradient>
+</defs>
+</svg>`;
 
-function createBracket(node: SceneNode): VectorNode {
-  const bracket = figma.createVector();
-  const maxX = BRACKET_WIDTH + BRACKET_PADDING;
-  const maxY = node.height + 2 * BRACKET_PADDING;
-  bracket.vectorPaths = [{ windingRule: 'NONZERO', data: `M 0 ${maxY} L ${maxX} ${maxY} L ${maxX} 0 L 0 0` }];
-  bracket.strokes = COLORS.CERULEAN;
-  bracket.strokeCap = 'NONE';
-  bracket.strokeWeight = 3;
-  bracket.x = node.absoluteTransform[0][2] + node.width - BRACKET_WIDTH;
-  bracket.y = node.absoluteTransform[1][2] - BRACKET_PADDING;
-
-  return bracket;
-}
-
-function createLogo(): VectorNode {
-  const logo = figma.createVector();
-  // Note(Kelvin): Taken by finding the Amplitude Asset and printing its SVG node attributes
-  logo.vectorPaths = [{ windingRule: 'EVENODD', data: 'M 6.680889213394365 3.707499816781527 C 6.784052194696425 3.8568528897808543 6.962363498365654 4.192179783260579 7.226230818026929 4.941080917080751 C 7.40678117562303 5.453465768669198 7.60378919583337 6.088148664157556 7.81217236626427 6.828747376227316 C 7.021599038242192 6.817436851296278 6.22170802027766 6.808893671224962 5.447174872504867 6.800771751398772 L 5.054925522530969 6.796620648102262 C 5.498024159640025 5.179763045346534 6.038591765432036 3.9529260355917377 6.433660600012848 3.6632442361151383 C 6.458891665255743 3.648125433177574 6.498100004734063 3.6302574521723288 6.540998864786492 3.6302574521723288 C 6.592852633209188 3.6302574521723288 6.639684527145201 3.6568250556459176 6.680889213394365 3.707499816781527 Z M 12.892873313480882 7.636246841106973 C 12.892328758148865 7.636667977664613 12.891784869375696 7.637089272158426 12.89124031404368 7.637630733456826 C 12.883132490321016 7.644128269317777 12.874842761893488 7.650324993852117 12.866311394720007 7.656220905939232 C 12.863528111802356 7.658146101651313 12.860805041625346 7.660071108400292 12.858021758707695 7.661996304112372 C 12.85227367473362 7.665726371005887 12.846344973105639 7.669215905661852 12.840415370429284 7.6726451606684485 C 12.834969817250004 7.675833766053449 12.829645017513329 7.679082656971029 12.824078451678027 7.682030613014586 C 12.823775920918452 7.682211100125725 12.823412723407346 7.682331423019228 12.823110192647771 7.682451747751233 C 12.767868076618544 7.711450008943615 12.705123346095188 7.727994543379021 12.638385065498857 7.727994543379021 L 9.08582710363603 7.727994543379021 C 9.11426499271161 7.845732299445962 9.145243653367642 7.979473148610799 9.178945578610746 8.125066077225936 C 9.373654362301217 8.96577501394985 9.890861348538245 11.199182118856234 10.440378209594035 11.199182118856234 L 10.451087916150383 11.199423095136058 L 10.457077504192135 11.198580825662766 L 10.467606022825063 11.198640495979674 C 10.896776126836933 11.198580333613672 11.115869256275507 10.578066474798549 11.595985552667406 9.218577419864678 L 11.601793952785735 9.20215316513546 C 11.678878784197297 8.983823940081134 11.765947163956989 8.737458505462435 11.860155236888783 8.476774973901886 L 11.884114743118994 8.410295929581682 L 11.88453828431578 8.410476088038504 C 11.909043274749559 8.345440570525495 11.971667261409934 8.299176029423894 12.04524273988454 8.299176029423894 C 12.14017688987948 8.299176029423894 12.217141608556378 8.376063438124483 12.217141608556378 8.471059819798704 C 12.217141608556378 8.488266256816857 12.2145397110715 8.504871182122313 12.209820231574323 8.520573560266179 L 12.209880242861061 8.520573560266179 L 12.189913795325351 8.587353824936164 C 12.139754196197861 8.749250762192673 12.086629200104847 8.969625273422016 12.025033939075465 9.224713708704508 C 11.738900358327008 10.410574118527894 11.306644451591087 12.202088675292956 10.197566773135408 12.202088675292956 L 10.189459479109725 12.202029004976046 C 9.472824672601886 12.196373742510527 9.044077695045338 11.050702360748987 8.860925574079126 10.561522162244204 C 8.518460779738959 9.646753397344794 8.25937351775007 8.67206243794861 8.009483129711704 7.727994543379021 L 4.739295005868411 7.727994543379021 L 4.0604582938868115 9.900758317927426 L 4.0504929580986575 9.892877246071054 C 3.988425748330647 9.990580935287847 3.879539086870569 10.053149422276583 3.759373878394821 10.053149422276583 C 3.5698444221817103 10.053149422276583 3.4148819675243725 9.898953470138755 3.4140288308070246 9.70938184152696 L 3.4144523720038116 9.697590068900857 L 3.4555543331034184 9.451886637719934 C 3.5493328150227104 8.893579883177761 3.6616925440496306 8.314036161627305 3.789814315076951 7.727994543379021 L 2.4088159753892175 7.727994543379021 L 2.4037153045322754 7.722760194329393 C 2.15303833225749 7.686662774622833 1.9605320962288677 7.46556610329345 1.9605320962288677 7.207770360468385 C 1.9605320962288677 6.954968097991819 2.1394426922986667 6.739767158331113 2.3859447507627394 6.696029116360638 C 2.4086224556693066 6.693141322582403 2.4542380458767052 6.689230716504336 2.5475143209626734 6.689230716504336 C 2.567487399853761 6.689230716504336 2.589808066455816 6.689411446893211 2.6146095361781505 6.689832583450851 C 3.0523836141682033 6.6974130417685265 3.516659275052116 6.704331540352273 4.026042397974081 6.7108290762132246 C 4.746942910608957 3.7820168544165145 5.581782785300774 2.295260498931 6.507841474800453 2.291049133074446 C 7.501594482577685 2.291049133074446 8.238740995421832 4.553785704843379 8.828736443123342 6.767141216537001 L 8.831095925349036 6.775985046006579 C 10.043457644533913 6.800230480394198 11.335809071398428 6.8355457940134 12.591916710489011 6.925548695339121 L 12.644556995527235 6.930422153722059 C 12.664826555960909 6.930722965573959 12.68449030083206 6.932767970230373 12.7039127743641 6.935956575615373 L 12.711234151346156 6.9366789307018015 C 12.713412372674219 6.936979742553701 12.715470213319838 6.937641112740966 12.7176484346479 6.938062249298606 C 12.718737545311932 6.938242736409745 12.71982647692148 6.938543954921024 12.72091558758551 6.9387846043850345 C 12.903765163669243 6.975363324455398 13.039479732918998 7.135876127309987 13.039479732918998 7.328455871429133 C 13.039479732918998 7.451788723774131 12.982361908042513 7.5629089152908895 12.892873313480882 7.636246841106973 Z M 7.4999607618509785 0 C 3.3578672104099576 0 0 3.357877946814776 0 7.499978771137254 C 0 11.64209766868072 3.3578672104099576 15.000000000000002 7.4999607618509785 15.000000000000002 C 11.642090666283003 15.000000000000002 15 11.64209766868072 15 7.499978771137254 C 15 3.357877946814776 11.642090666283003 0 7.4999607618509785 0 Z' }];
-  logo.strokes = COLORS.WHITE;
-  logo.strokeCap = 'NONE';
-  logo.strokeWeight = 0.25;
-  logo.fills = COLORS.CERULEAN;
-
-  return logo;
+function createLogo(): FrameNode {
+  const node = figma.createNodeFromSvg(MOMMOM_LOGO_SVG);
+  node.name = 'logo';
+  node.rescale(LOGO_SIZE / node.width);
+  return node;
 }
 
 function createTextNode(str: string): TextNode {
   const text = figma.createText();
   text.fontName = { family: 'Inter', style: 'Regular' };
   text.insertCharacters(0, str);
+  text.textAutoResize = 'HEIGHT';
   return text;
 }
 
 function createDetailFrame(title: string, data: string): FrameNode {
   const container = figma.createFrame();
-  const titleTextNode = createTextNode(title);
+  const titleTextNode = createTextNode(title.toUpperCase());
   const dataTextNode = createTextNode(data);
+  titleTextNode.fontSize = LABEL_FONT_SIZE;
   titleTextNode.fills = COLORS.GRAY;
-  dataTextNode.fontSize = 14;
+  dataTextNode.fontSize = VALUE_FONT_SIZE;
 
   container.layoutMode = 'VERTICAL';
   container.name = `${title} group`;
-  container.itemSpacing = 4;
+  container.itemSpacing = DETAIL_INNER_GAP;
 
   // Lets content stretch to fill parent container
   container.layoutAlign = 'STRETCH';
@@ -76,11 +83,87 @@ function createDetailFrame(title: string, data: string): FrameNode {
   return container;
 }
 
-function createDivider(): LineNode {
-  const divider = figma.createLine();
-  divider.strokes = COLORS.LIGHT_GRAY;
-  divider.layoutAlign = 'STRETCH';
-  return divider;
+// Renders a single property as one TextNode like "age  any  required".
+// Using one node (not a horizontal frame of three) avoids truncation on
+// narrow cards: the text wraps as one block via textAutoResize='HEIGHT'.
+// Color differentiation for type and required is applied via setRangeFills.
+function createPropertyLine(prop: EventProperty): TextNode {
+  const namePart = prop.name;
+  const typePart = prop.valueType !== '' ? `  ${prop.valueType}` : '';
+  const reqPart = prop.required ? '  required' : '';
+  const fullText = namePart + typePart + reqPart;
+
+  const node = createTextNode(fullText);
+  node.fontSize = VALUE_FONT_SIZE;
+  node.layoutAlign = 'STRETCH';
+
+  if (typePart !== '') {
+    const start = namePart.length;
+    const end = start + typePart.length;
+    node.setRangeFills(start, end, [...COLORS.GRAY]);
+  }
+  if (reqPart !== '') {
+    const start = namePart.length + typePart.length;
+    const end = fullText.length;
+    node.setRangeFills(start, end, [...REQUIRED_PAINT]);
+  }
+
+  return node;
+}
+
+// Renders a "PROPERTIES" section: small uppercase label followed by every
+// property tightly packed (PROPERTIES_GAP between rows). The card height
+// grows with the property count — there is no cap or "+N more" indicator.
+function createPropertiesSection(properties: EventProperty[]): FrameNode {
+  const section = figma.createFrame();
+  section.layoutMode = 'VERTICAL';
+  section.layoutAlign = 'STRETCH';
+  section.itemSpacing = DETAIL_INNER_GAP;
+
+  const label = createTextNode('PROPERTIES');
+  label.fontSize = LABEL_FONT_SIZE;
+  label.fills = COLORS.GRAY;
+  label.layoutAlign = 'STRETCH';
+  section.appendChild(label);
+
+  const rows = figma.createFrame();
+  rows.layoutMode = 'VERTICAL';
+  rows.layoutAlign = 'STRETCH';
+  rows.itemSpacing = PROPERTIES_GAP;
+  section.appendChild(rows);
+
+  for (const prop of properties) {
+    rows.appendChild(createPropertyLine(prop));
+  }
+
+  return section;
+}
+
+// Stamps every node in the card subtree with both 'cardEventName' and
+// 'cardId' pluginData. handlers.ts uses cardEventName as a robust fallback
+// when walking up from a deep child selection; cardId is the lookup key
+// for TOGGLE_CARD (so the UI can target a specific card across the page
+// without knowing which Figma node holds it). The cardId is read from the
+// group itself — createLabel is responsible for setting it before the
+// first call to this function. Called whenever the card content is
+// (re)created so freshly-built descendants inherit both stamps.
+function tagCardWithEventName(group: GroupNode, eventName: string): void {
+  const cardId = group.getPluginData('cardId');
+  group.setPluginData('cardEventName', eventName);
+  const tagRecursive = (node: SceneNode): void => {
+    node.setPluginData('cardEventName', eventName);
+    if (cardId.length > 0) {
+      node.setPluginData('cardId', cardId);
+    }
+    if ('children' in node) {
+      for (const child of node.children) {
+        tagRecursive(child);
+      }
+    }
+  };
+  for (const child of group.children) {
+    tagRecursive(child);
+  }
 }
 
 function addToAmplitudeGroup(newLabel: GroupNode): void {
@@ -96,63 +179,396 @@ function addToAmplitudeGroup(newLabel: GroupNode): void {
   }
 }
 
-/**
- * Creates event label and adds it to the page
- * @param event event that label represents
- * @param clientNode associated Figma node that event is attached to
- */
-export async function createLabel(event: EventMetadata, clientNode: SceneNode): Promise<void> {
-  await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+interface Placement { x: number; y: number; }
+interface Rect { x: number; y: number; width: number; height: number; }
 
-  const container = figma.createFrame();
-  container.horizontalPadding = PADDING_HORIZONTAL;
-  container.verticalPadding = PADDING_VERTICAL;
-  container.itemSpacing = 16;
-  container.name = 'Label';
-  container.layoutMode = 'VERTICAL';
-  addDropShadow(container);
+const CARD_GAP = 8;
 
-  // clientNode.x uses relative positioning, we need absolute
-  container.x = clientNode.absoluteTransform[0][2] + clientNode.width + OFFSET_X;
-  container.y = clientNode.absoluteTransform[1][2] - OFFSET_Y;
+function rectsOverlap(a: Rect, b: Rect): boolean {
+  return a.x < b.x + b.width + CARD_GAP
+    && a.x + a.width + CARD_GAP > b.x
+    && a.y < b.y + b.height + CARD_GAP
+    && a.y + a.height + CARD_GAP > b.y;
+}
 
-  container.strokes = COLORS.CERULEAN;
-  container.strokeWeight = 3;
+function getExistingCardBounds(): Rect[] {
+  const group = figma.currentPage.findOne((n) => n.name === 'Amplitude Event Labels') as GroupNode | null;
+  if (group === null) return [];
+  const bounds: Rect[] = [];
+  for (const child of group.children) {
+    if ('width' in child && 'height' in child) {
+      bounds.push({
+        x: child.absoluteTransform[0][2],
+        y: child.absoluteTransform[1][2],
+        width: child.width,
+        height: child.height,
+      });
+    }
+  }
+  return bounds;
+}
 
+// Returns the lowest y >= baseY where a CARD_WIDTH × CARD_HEIGHT_COLLAPSED
+// rect at column x does not overlap any existing card.
+function findVerticalSlot(x: number, baseY: number, existing: Rect[]): number {
+  let y = baseY;
+  while (true) {
+    const candidate: Rect = { x, y, width: CARD_WIDTH, height: CARD_HEIGHT_COLLAPSED };
+    const collides = existing.some((b) => rectsOverlap(candidate, b));
+    if (!collides) return y;
+    y += CARD_HEIGHT_COLLAPSED + CARD_GAP;
+  }
+}
+
+// Anchor the card to the right edge of the mapped node, top-aligned with the
+// node. Multiple mappings on (or near) the same anchor stack downward via
+// findVerticalSlot. The card itself never overlaps the node since it sits to
+// the right of node.x + node.width.
+function computePlacement(clientNode: SceneNode): Placement {
+  const x = clientNode.absoluteTransform[0][2] + clientNode.width;
+  const baseY = clientNode.absoluteTransform[1][2];
+  const y = findVerticalSlot(x, baseY, getExistingCardBounds());
+  return { x, y };
+}
+
+// Builds the card's header row: logo + event name. The row stretches to the
+// fixed parent width (CARD_WIDTH - 2 × PADDING_HORIZONTAL); the logo holds
+// its natural size and the name fills the remainder via layoutGrow.
+// Truncation/multiline behavior on the name is set later by drawCollapsedCard
+// or drawExpandedCard, which is the only place that knows the current state.
+function buildHeaderRow(eventName: string): { row: FrameNode; nameNode: TextNode } {
+  const row = figma.createFrame();
+  row.layoutMode = 'HORIZONTAL';
+  row.primaryAxisSizingMode = 'FIXED';
+  row.counterAxisSizingMode = 'AUTO';
+  row.layoutAlign = 'STRETCH';
+  row.counterAxisAlignItems = 'CENTER';
+  row.itemSpacing = 6;
+
+  const logo = createLogo();
+  logo.layoutGrow = 0;
+  row.appendChild(logo);
+
+  const nameNode = createTextNode(eventName);
+  nameNode.fontSize = 14;
+  // Width is driven by layoutGrow (fills remaining row space); height grows
+  // when the name wraps. drawCollapsedCard then turns wrapping off via
+  // textTruncation='ENDING' + maxLines=1; drawExpandedCard re-enables wrap.
+  nameNode.textAutoResize = 'HEIGHT';
+  nameNode.layoutGrow = 1;
+  nameNode.setPluginData(NodeMarker.NAME, NodeMarker.NAME);
+  row.appendChild(nameNode);
+
+  return { row, nameNode };
+}
+
+// Padding for the minimized "pill" — height should hug the event name text.
+const MINIMIZED_PADDING_VERTICAL = 8;
+const MINIMIZED_PADDING_HORIZONTAL = 12;
+// Tight padding for the "logo only" / "Hide Names" mode so the card hugs the
+// logo glyph at the corner of the mapped node.
+const LOGO_ONLY_PADDING = 4;
+
+// Builds a logo-only card body. Used when the user has globally hidden names
+// via the All Events toggle: the card collapses to just the brand mark at
+// the corner of the mapped node.
+function buildLogoOnlyContent(container: FrameNode): {[key: string]: string} {
+  container.appendChild(createLogo());
+  return {};
+}
+
+// Builds a minimized "pill" — only the event name is rendered. We don't append
+// the other text nodes here (Trigger/Description/Notes); their data is
+// preserved via the 'eventData' JSON pluginData on the group, which the loader
+// reads first. The pill's height = name text height + 2×MINIMIZED_PADDING_VERTICAL.
+function buildMinimizedCardContent(
+  container: FrameNode,
+  event: EventMetadata
+): {[key: string]: string} {
+  const pluginData: {[key: string]: string} = {};
+  const { row, nameNode } = buildHeaderRow(event.name);
+  pluginData[NodeMarker.NAME] = nameNode.id;
+  container.appendChild(row);
+  return pluginData;
+}
+
+// Collapsed body: just the event name in the header row, single line with
+// trailing-ellipsis truncation when the name overflows the fixed card width.
+// Description/Trigger/etc. are not rendered; consumers (selection banner,
+// loader) read the full event from the group's 'eventData' JSON pluginData.
+function drawCollapsedCard(container: FrameNode, event: EventMetadata): {[key: string]: string} {
+  const pluginData: {[key: string]: string} = {};
+  const { row, nameNode } = buildHeaderRow(event.name);
+  nameNode.textTruncation = 'ENDING';
+  nameNode.maxLines = 1;
+  pluginData[NodeMarker.NAME] = nameNode.id;
+  container.appendChild(row);
+  return pluginData;
+}
+
+// Expanded body: populated fields render in the order
+// name → Trigger → Activity → Properties (capped at MAX_PROPERTIES_VISIBLE) →
+// Description. The pluginData map only carries NAME (and DESCRIPTION/TRIGGER
+// when their detail frames are present) — full field recovery is handled
+// from 'eventData' JSON in handlers.ts and loader.ts.
+function drawExpandedCard(container: FrameNode, event: EventMetadata): {[key: string]: string} {
   const pluginData: {[key: string]: string} = {};
 
-  const name = createTextNode(event.name);
-  name.fontSize = 16;
-  name.setPluginData(NodeMarker.NAME, NodeMarker.NAME);
-
-  const nameContainer = figma.createFrame();
-  nameContainer.layoutMode = 'HORIZONTAL';
-  nameContainer.itemSpacing = 4;
-  nameContainer.appendChild(createLogo());
-  nameContainer.appendChild(name);
-  nameContainer.counterAxisSizingMode = 'AUTO';
-  pluginData[NodeMarker.NAME] = name.id;
+  const { row, nameNode } = buildHeaderRow(event.name);
+  // Show the full name, wrapping across as many lines as needed.
+  nameNode.textTruncation = 'DISABLED';
+  nameNode.maxLines = null;
+  pluginData[NodeMarker.NAME] = nameNode.id;
+  container.appendChild(row);
 
   const trigger = createDetailFrame('Trigger', event.trigger);
   pluginData[NodeMarker.TRIGGER] = trigger.children[1].id;
-
-  const description = createDetailFrame('Description', event.description);
-  pluginData[NodeMarker.DESCRIPTION] = description.children[1].id;
-
-  const notes = createDetailFrame('Dev Notes', event.notes);
-  pluginData[NodeMarker.NOTES] = notes.children[1].id;
-
-  container.appendChild(nameContainer);
   container.appendChild(trigger);
-  container.appendChild(description);
-  container.appendChild(createDivider());
-  container.appendChild(notes);
-  container.resize(300, container.height);
-  const group = figma.group([container, createBracket(clientNode)], figma.currentPage);
+
+  if (event.activity !== undefined && event.activity !== '') {
+    container.appendChild(createDetailFrame('Activity', event.activity));
+  }
+
+  if (event.properties !== undefined && event.properties.length > 0) {
+    container.appendChild(createPropertiesSection(event.properties));
+  }
+
+  if (event.description !== '') {
+    const description = createDetailFrame('Description', event.description);
+    pluginData[NodeMarker.DESCRIPTION] = description.children[1].id;
+    container.appendChild(description);
+  }
+
+  return pluginData;
+}
+
+/**
+ * Creates event label and adds it to the page.
+ * @param event event that label represents
+ * @param clientNode associated Figma node that event is attached to
+ * @returns the unique cardId stamped on the new card (and every descendant).
+ *   Callers attach this id to the EventMapping so the UI can later target
+ *   this specific card via TOGGLE_CARD.
+ */
+export async function createLabel(event: EventMetadata, clientNode: SceneNode): Promise<string> {
+  await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+
+  const container = figma.createFrame();
+  container.name = 'Label';
+  container.layoutMode = 'VERTICAL';
+  // Card width is fixed in both collapsed and expanded states; only the
+  // height grows when expanded. Header-row name uses ellipsis when collapsed
+  // and wraps when expanded — see drawCollapsedCard / drawExpandedCard.
+  container.counterAxisSizingMode = 'FIXED';
+  container.primaryAxisSizingMode = 'AUTO';
+  container.horizontalPadding = PADDING_HORIZONTAL;
+  container.verticalPadding = PADDING_VERTICAL;
+  container.itemSpacing = SECTION_GAP;
+  container.cornerRadius = CARD_CORNER_RADIUS;
+  container.fills = COLORS.WHITE;
+
+  const placement = computePlacement(clientNode);
+  container.x = placement.x;
+  container.y = placement.y;
+
+  // Brand-colored 1px border with a 3px left accent strip ("Option A" style)
+  // for ownership signaling on the canvas.
+  container.strokes = COLORS.BRAND;
+  container.strokeAlign = 'INSIDE';
+  container.strokeTopWeight = CARD_STROKE_REGULAR;
+  container.strokeRightWeight = CARD_STROKE_REGULAR;
+  container.strokeBottomWeight = CARD_STROKE_REGULAR;
+  container.strokeLeftWeight = CARD_STROKE_LEFT_ACCENT;
+
+  container.resize(CARD_WIDTH, container.height);
+  const pluginData = drawCollapsedCard(container, event);
+
+  const group = figma.group([container], figma.currentPage);
   group.name = `${event.name}`;
   addToAmplitudeGroup(group);
 
+  // Per spec: cardId = eventName + "_" + Date.now(). Stamped on the group
+  // *before* tagCardWithEventName so the helper can fan it out to every
+  // descendant in the same recursion. Used by TOGGLE_CARD to find the card
+  // group via figma.currentPage.findAll without a clientNodeId round-trip.
+  const cardId = `${event.name}_${Date.now()}`;
+  group.setPluginData('cardId', cardId);
+
   // Store label with event data and associated client node id
   group.setPluginData('eventMetadata', JSON.stringify(pluginData));
+  group.setPluginData('eventData', JSON.stringify(event));
   group.setPluginData('clientNodeId', clientNode.id);
+  group.setPluginData('isExpanded', 'false');
+
+  // If the user has globally hidden names, the freshly drawn full-collapsed
+  // body needs to be re-rendered as logo-only so the new card matches every
+  // other card on the page. renderCardFromState re-stamps cardEventName too.
+  if (figma.currentPage.getPluginData('namesHidden') === 'true') {
+    await renderCardFromState(group);
+  } else {
+    tagCardWithEventName(group, event.name);
+  }
+
+  return cardId;
 }
+
+// Rebuilds a card's visible content from its current pluginData state.
+// Honors both isMinimized and isExpanded flags. The card group must have been
+// created via createLabel (i.e. has 'eventData' plugin data).
+async function renderCardFromState(group: GroupNode): Promise<void> {
+  await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+
+  const eventDataStr = group.getPluginData('eventData');
+  if (eventDataStr.length === 0) return;
+
+  let event: EventMetadata;
+  try {
+    event = JSON.parse(eventDataStr) as EventMetadata;
+  } catch {
+    return;
+  }
+
+  const container = group.children.find((c) => c.type === 'FRAME') as FrameNode | undefined;
+  if (container === undefined) return;
+
+  for (const child of [...container.children]) {
+    child.remove();
+  }
+
+  const namesHidden = figma.currentPage.getPluginData('namesHidden') === 'true';
+  const isMinimized = group.getPluginData('isMinimized') === 'true';
+  const isExpanded = group.getPluginData('isExpanded') === 'true';
+
+  let pluginData: {[key: string]: string};
+  if (namesHidden) {
+    // Logo-only mode wins over isMinimized/isExpanded: the user has globally
+    // chosen to hide names, so collapse every card to just the brand mark.
+    container.verticalPadding = LOGO_ONLY_PADDING;
+    container.horizontalPadding = LOGO_ONLY_PADDING;
+    container.itemSpacing = 0;
+    container.counterAxisSizingMode = 'AUTO';
+    container.primaryAxisSizingMode = 'AUTO';
+    pluginData = buildLogoOnlyContent(container);
+  } else if (isMinimized) {
+    container.verticalPadding = MINIMIZED_PADDING_VERTICAL;
+    container.horizontalPadding = MINIMIZED_PADDING_HORIZONTAL;
+    container.itemSpacing = 0;
+    pluginData = buildMinimizedCardContent(container, event);
+    container.resize(CARD_WIDTH_MINIMIZED, container.height);
+  } else {
+    container.verticalPadding = PADDING_VERTICAL;
+    container.horizontalPadding = PADDING_HORIZONTAL;
+    container.itemSpacing = SECTION_GAP;
+    container.counterAxisSizingMode = 'FIXED';
+    container.primaryAxisSizingMode = 'AUTO';
+    container.resize(CARD_WIDTH, container.height);
+    pluginData = isExpanded
+      ? drawExpandedCard(container, event)
+      : drawCollapsedCard(container, event);
+  }
+
+  group.setPluginData('eventMetadata', JSON.stringify(pluginData));
+  // Re-stamp cardEventName on every fresh child so canvas selection of any
+  // inner node still resolves to this event.
+  tagCardWithEventName(group, event.name);
+}
+
+export async function setCardExpansion(group: GroupNode, isExpanded: boolean): Promise<void> {
+  group.setPluginData('isExpanded', isExpanded ? 'true' : 'false');
+  // Expanding/collapsing implicitly restores from minimized state.
+  if (group.getPluginData('isMinimized') === 'true') {
+    group.setPluginData('isMinimized', 'false');
+  }
+  await renderCardFromState(group);
+}
+
+export async function minimizeCard(group: GroupNode): Promise<void> {
+  group.setPluginData('isMinimized', 'true');
+  await renderCardFromState(group);
+}
+
+export async function restoreCard(group: GroupNode): Promise<void> {
+  group.setPluginData('isMinimized', 'false');
+  await renderCardFromState(group);
+}
+
+function findEventGroups(eventName: string): GroupNode[] {
+  const groupedLabels = figma.currentPage.findOne((n) => n.name === 'Amplitude Event Labels') as GroupNode | null;
+  if (groupedLabels === null) return [];
+  const matches: GroupNode[] = [];
+  for (const child of groupedLabels.children) {
+    if (child.type === 'GROUP' && child.name === eventName) {
+      matches.push(child);
+    }
+  }
+  return matches;
+}
+
+function findGroupByClientNodeId(nodeId: string): GroupNode | null {
+  const groupedLabels = figma.currentPage.findOne((n) => n.name === 'Amplitude Event Labels') as GroupNode | null;
+  if (groupedLabels === null) return null;
+  for (const child of groupedLabels.children) {
+    if (child.type === 'GROUP' && child.getPluginData('clientNodeId') === nodeId) {
+      return child;
+    }
+  }
+  return null;
+}
+
+export async function setCardExpansionByNodeId(nodeId: string, isExpanded: boolean): Promise<void> {
+  const group = findGroupByClientNodeId(nodeId);
+  if (group !== null) await setCardExpansion(group, isExpanded);
+}
+
+// Locates a card group by the cardId stamped on its pluginData. Per the
+// TOGGLE_CARD spec, scans the whole page via findAll — the matched set
+// contains the group itself (which carries cardId) plus every descendant
+// (also carrying cardId via tagCardWithEventName); we pick the GROUP entry.
+function findGroupByCardId(cardId: string): GroupNode | null {
+  if (cardId.length === 0) return null;
+  const matches = figma.currentPage.findAll((n) => n.getPluginData('cardId') === cardId);
+  for (const match of matches) {
+    if (match.type === 'GROUP') return match;
+  }
+  return null;
+}
+
+export async function setCardExpansionByCardId(cardId: string, isExpanded: boolean): Promise<void> {
+  const group = findGroupByCardId(cardId);
+  if (group !== null) await setCardExpansion(group, isExpanded);
+}
+
+export async function setMinimizedByEventName(eventName: string, isMinimized: boolean): Promise<void> {
+  for (const group of findEventGroups(eventName)) {
+    if (isMinimized) {
+      await minimizeCard(group);
+    } else {
+      await restoreCard(group);
+    }
+  }
+}
+
+// Persists the "names hidden" flag on the current page and re-renders every
+// card so they switch to logo-only or back to their normal state. Called by
+// the TOGGLE_LABEL_NAMES message handler.
+export async function applyNamesVisibility(visible: boolean): Promise<void> {
+  figma.currentPage.setPluginData('namesHidden', visible ? '' : 'true');
+  const group = figma.currentPage.findOne((n) => n.name === 'Amplitude Event Labels') as GroupNode | null;
+  if (group === null) return;
+  for (const child of group.children) {
+    if (child.type === 'GROUP') {
+      await renderCardFromState(child);
+    }
+  }
+}
+
+// Removes the event label group whose clientNodeId matches the given nodeId.
+// Returns true when a matching group was found and removed, false otherwise.
+export function removeMappingByNodeId(nodeId: string): boolean {
+  const group = findGroupByClientNodeId(nodeId);
+  if (group === null) return false;
+  group.remove();
+  return true;
+}
+
+export { CARD_WIDTH, CARD_WIDTH_MINIMIZED, CARD_HEIGHT_COLLAPSED, CARD_HEIGHT_EXPANDED };

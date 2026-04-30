@@ -1,0 +1,8 @@
+Event Type,Description,Category,Property Group,Property Name,Property Type,Property Description,Is Required,Enum Values
+Button Clicked,When a user clicks a button,UI Interaction,Event,button_label,string,Label text on the button,false,
+Button Clicked,,,,page_url,string,URL of the current page,true,
+Form Submitted,When a user submits a form,Conversion,Event,form_id,string,Identifier of the form,true,
+Form Submitted,,,,submission_result,string,Result of the submission,false,success;failure;pending
+Page Viewed,When a user views a page,Navigation,Event,page_name,string,Name of the page,true,
+Page Viewed,,,,referrer,string,Previous page URL,false,
+Signup Completed,When a user completes signup,Onboarding,Event,plan_type,string,Plan selected at signup,true,free;pro;enterprise

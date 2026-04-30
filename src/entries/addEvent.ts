@@ -7,5 +7,6 @@ import { attachHandlers } from 'src/lib/handlers';
 export default async function (): Promise<void> {
   attachHandlers();
   const initialData = await loadInitialData();
-  showUI(REGULAR_TAB_SIZE, { ...initialData, initialTab: Tab.ADD_EVENT });
+  const size = initialData.initialUiSize ?? REGULAR_TAB_SIZE;
+  showUI(size, { ...initialData, initialTab: Tab.ADD_EVENT, initialUiSize: size });
 }
