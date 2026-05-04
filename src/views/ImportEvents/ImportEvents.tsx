@@ -1,14 +1,16 @@
 /** @jsx h */
 import { Button, Container, Divider, VerticalSpace } from '@create-figma-plugin/ui';
 import { h, JSX } from 'preact';
-import { useState, useRef } from 'preact/hooks';
+import { useState, useRef, useMemo } from 'preact/hooks';
 
 import { parseAmplitudeCsv } from 'src/lib/parser';
 import { EventMapping, EventMetadata } from 'src/types/event';
 import { PropertiesAccordion } from 'src/views/shared/PropertiesAccordion';
+import { BrandButton } from 'src/views/shared/BrandButton';
 
 export interface Props {
   onImport: (events: EventMetadata[]) => void;
+  existingEvents?: EventMetadata[];
   mappings?: Record<string, EventMapping[]>;
   onMapEvent?: (event: EventMetadata) => void;
   onUnmapEvent?: (eventName: string, nodeId: string) => void;
@@ -164,6 +166,33 @@ interface EventCardProps {
   onToggleExpansion?: () => void;
   minimized: boolean;
   onToggleMinimized?: () => void;
+  isDuplicate?: boolean;
+}
+
+function DuplicateBadge(): JSX.Element {
+  return (
+    <span
+      title="This event already exists in All Events"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '4px',
+        padding: '2px 6px',
+        borderRadius: '3px',
+        background: 'rgba(217, 119, 6, 0.12)',
+        border: '1px solid rgba(217, 119, 6, 0.35)',
+        color: '#d97706',
+        fontSize: '10px',
+        fontWeight: 600,
+        lineHeight: '1.2',
+        flexShrink: 0,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <span aria-hidden="true">⚠️</span>
+      <span>Already in All Events</span>
+    </span>
+  );
 }
 
 function MappedNodeRow({
@@ -256,17 +285,20 @@ function IconToggle({ label, glyph, onClick }: { label: string; glyph: string; o
   );
 }
 
-function EventCard({ event, mappedNodes, onClick, onUnmap, onFocusNode, expanded, onToggleExpansion, minimized, onToggleMinimized }: EventCardProps): JSX.Element {
+function EventCard({ event, mappedNodes, onClick, onUnmap, onFocusNode, expanded, onToggleExpansion, minimized, onToggleMinimized, isDuplicate = false }: EventCardProps): JSX.Element {
   const sources = event.sources ?? [];
   const tags = event.tags ?? [];
   const properties = event.properties ?? [];
   const isMapped = mappedNodes.length > 0;
-  const clickable = onClick !== undefined;
+  const clickable = onClick !== undefined && !isDuplicate;
 
   const cardInteractiveStyle = {
     ...cardStyle,
     cursor: clickable ? 'pointer' as const : 'default' as const,
-    transition: 'background-color 0.12s ease, border-color 0.12s ease',
+    transition: 'background-color 0.12s ease, border-color 0.12s ease, opacity 0.12s ease',
+    background: isDuplicate ? '#f5f5f5' : (cardStyle.background as string),
+    color: isDuplicate ? '#9ca3af' : 'inherit',
+    opacity: isDuplicate ? 0.75 : 1,
   };
 
   return (
@@ -314,6 +346,7 @@ function EventCard({ event, mappedNodes, onClick, onUnmap, onFocusNode, expanded
         >
           {event.name}
         </div>
+        {isDuplicate && <DuplicateBadge />}
         {isMapped && <MappedBadge mappings={mappedNodes} />}
         {onToggleMinimized !== undefined && isMapped && (
           <IconToggle
@@ -375,12 +408,30 @@ function EventCard({ event, mappedNodes, onClick, onUnmap, onFocusNode, expanded
   );
 }
 
-function ImportEvents({ onImport, mappings = {}, onMapEvent, onUnmapEvent, onFocusNode, expansion = {}, onToggleExpansion, minimized = {}, onToggleMinimized }: Props): JSX.Element {
+function ImportEvents({ onImport, existingEvents = [], mappings = {}, onMapEvent, onUnmapEvent, onFocusNode, expansion = {}, onToggleExpansion, minimized = {}, onToggleMinimized }: Props): JSX.Element {
   const [parsed, setParsed] = useState<EventMetadata[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [fileName, setFileName] = useState<string>('');
   const [imported, setImported] = useState(false);
+  const [showDuplicates, setShowDuplicates] = useState(false);
+  // Snapshot of import counts at the moment the user clicked Import — keeps
+  // the post-import summary stable even if `existingEvents` mutates afterwards.
+  const [importSummary, setImportSummary] = useState<{ imported: number; skipped: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const existingNames = useMemo(
+    () => new Set(existingEvents.map((e) => e.name)),
+    [existingEvents]
+  );
+  const newEvents = useMemo(
+    () => parsed.filter((e) => !existingNames.has(e.name)),
+    [parsed, existingNames]
+  );
+  const duplicateEvents = useMemo(
+    () => parsed.filter((e) => existingNames.has(e.name)),
+    [parsed, existingNames]
+  );
+  const visibleEvents = showDuplicates ? parsed : newEvents;
 
   const onFileChange = (e: JSX.TargetedEvent<HTMLInputElement>): void => {
     const file = e.currentTarget.files?.[0];
@@ -388,6 +439,8 @@ function ImportEvents({ onImport, mappings = {}, onMapEvent, onUnmapEvent, onFoc
 
     setFileName(file.name);
     setImported(false);
+    setImportSummary(null);
+    setShowDuplicates(false);
     const reader = new FileReader();
     reader.onload = (ev): void => {
       const text = (ev.target?.result ?? '') as string;
@@ -399,9 +452,17 @@ function ImportEvents({ onImport, mappings = {}, onMapEvent, onUnmapEvent, onFoc
   };
 
   const onClickImport = (): void => {
-    onImport(parsed);
+    const toImport = showDuplicates ? parsed : newEvents;
+    if (toImport.length === 0) return;
+    onImport(toImport);
+    setImportSummary({
+      imported: newEvents.length,
+      skipped: showDuplicates ? 0 : duplicateEvents.length,
+    });
     setImported(true);
   };
+
+  const importButtonCount = showDuplicates ? parsed.length : newEvents.length;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1, height: '89%', minWidth: 0, minHeight: 0 }}>
@@ -417,11 +478,11 @@ function ImportEvents({ onImport, mappings = {}, onMapEvent, onUnmapEvent, onFoc
           padding: '12px',
         }}
       >
-        <div style={{ fontWeight: 600, fontSize: '13px', color: '#1a1a1a', minWidth: 0 }}>
-          Import from Amplitude Data CSV
+        <div style={{ fontWeight: 600, fontSize: '13px', color: '#1a1a1a', minWidth: 0, lineHeight: 1.5 }}>
+          Get started by importing your Amplitude event list.
         </div>
-        <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px', minWidth: 0 }}>
-          Supports Amplitude Data taxonomy export format.
+        <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px', minWidth: 0, lineHeight: 1.5 }}>
+          Go to Amplitude → Data → Events → Export (CSV)
         </div>
 
         <input
@@ -490,33 +551,93 @@ function ImportEvents({ onImport, mappings = {}, onMapEvent, onUnmapEvent, onFoc
           </div>
         )}
 
-        {imported && (
-          <div style={{ marginTop: '8px', fontSize: '12px', color: '#1a1a1a' }}>
-            {parsed.length} event{parsed.length !== 1 ? 's' : ''} imported. Switch to &quot;All Events&quot; tab to view.
+        {imported && importSummary !== null && (
+          <div style={{ marginTop: '8px', fontSize: '12px', color: '#1a1a1a', lineHeight: '1.5' }}>
+            <div>
+              ✅ {importSummary.imported} new event{importSummary.imported !== 1 ? 's' : ''} imported.
+            </div>
+            {importSummary.skipped > 0 && (
+              <div style={{ color: '#6b7280' }}>
+                {importSummary.skipped} duplicate event{importSummary.skipped !== 1 ? 's' : ''} skipped.
+              </div>
+            )}
           </div>
         )}
 
         {parsed.length > 0 && !imported && (
           <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, marginTop: '12px' }}>
-            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px', marginBottom: '8px' }}>
-              {parsed.length} event{parsed.length !== 1 ? 's' : ''} found
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '11px',
+                color: '#1a1a1a',
+                padding: '6px 8px',
+                marginBottom: '8px',
+                background: '#f9fafb',
+                border: '1px solid #e5e7eb',
+                borderRadius: '3px',
+                minWidth: 0,
+              }}
+            >
+              <span><strong>Total:</strong> {parsed.length} event{parsed.length !== 1 ? 's' : ''}</span>
+              <span style={{ color: '#6b7280' }}>·</span>
+              <span style={{ color: '#16a34a' }}>✅ New: {newEvents.length}</span>
+              <span style={{ color: '#6b7280' }}>·</span>
+              <span style={{ color: '#d97706' }}>⚠️ Duplicate: {duplicateEvents.length}</span>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-              {parsed.map((event, i) => (
-                <EventCard
-                  key={i}
-                  event={event}
-                  mappedNodes={mappings[event.name] ?? []}
-                  onClick={onMapEvent !== undefined ? (): void => onMapEvent(event) : undefined}
-                  onUnmap={onUnmapEvent !== undefined ? (nodeId: string): void => onUnmapEvent(event.name, nodeId) : undefined}
-                  onFocusNode={onFocusNode}
-                  expanded={expansion[event.name] ?? false}
-                  onToggleExpansion={onToggleExpansion !== undefined ? (): void => onToggleExpansion(event.name) : undefined}
-                  minimized={minimized[event.name] ?? false}
-                  onToggleMinimized={onToggleMinimized !== undefined ? (): void => onToggleMinimized(event.name) : undefined}
+
+            {duplicateEvents.length > 0 && (
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '11px',
+                  color: '#1a1a1a',
+                  marginBottom: '8px',
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={showDuplicates}
+                  onChange={(e: JSX.TargetedEvent<HTMLInputElement>): void => setShowDuplicates(e.currentTarget.checked)}
+                  style={{ margin: 0, cursor: 'pointer' }}
                 />
-              ))}
-            </div>
+                Show duplicate events ({duplicateEvents.length})
+              </label>
+            )}
+
+            {visibleEvents.length === 0 ? (
+              <div style={{ fontSize: '11px', color: '#6b7280', padding: '12px 4px' }}>
+                All events in this CSV already exist in All Events.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                {visibleEvents.map((event, i) => {
+                  const dup = existingNames.has(event.name);
+                  return (
+                    <EventCard
+                      key={i}
+                      event={event}
+                      mappedNodes={mappings[event.name] ?? []}
+                      onClick={onMapEvent !== undefined && !dup ? (): void => onMapEvent(event) : undefined}
+                      onUnmap={onUnmapEvent !== undefined ? (nodeId: string): void => onUnmapEvent(event.name, nodeId) : undefined}
+                      onFocusNode={onFocusNode}
+                      expanded={expansion[event.name] ?? false}
+                      onToggleExpansion={onToggleExpansion !== undefined ? (): void => onToggleExpansion(event.name) : undefined}
+                      minimized={minimized[event.name] ?? false}
+                      onToggleMinimized={onToggleMinimized !== undefined ? (): void => onToggleMinimized(event.name) : undefined}
+                      isDuplicate={dup}
+                    />
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </Container>
@@ -524,9 +645,9 @@ function ImportEvents({ onImport, mappings = {}, onMapEvent, onUnmapEvent, onFoc
       <Divider />
       <VerticalSpace space="extraSmall" />
       <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'flex-end', width: '100%', padding: '0 16px' }}>
-        <Button onClick={onClickImport} disabled={parsed.length === 0 || imported}>
-          {imported ? 'Imported' : `Import${parsed.length > 0 ? ` ${parsed.length} Events` : ''}`}
-        </Button>
+        <BrandButton onClick={onClickImport} disabled={importButtonCount === 0 || imported}>
+          {imported ? 'Imported' : `Import${importButtonCount > 0 ? ` ${importButtonCount} Event${importButtonCount !== 1 ? 's' : ''}` : ''}`}
+        </BrandButton>
       </div>
       <VerticalSpace space="small" />
     </div>

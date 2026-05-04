@@ -213,13 +213,14 @@ export function parseAmplitudeCsv(csvText: string): ParseResult {
       const name = get(row, COL.propertyName);
       if (!name) continue; // empty name — skip silently
 
+      // Imported properties carry the source taxonomy's Value Type and
+      // Required flag so the UI can render them differently from properties
+      // that the user typed manually in Add Event.
       const property: EventProperty = {
         name,
-        description: get(row, COL.propertyDescription),
-        valueType: get(row, COL.propertyValueType),
-        schemaStatus: get(row, COL.propertySchemaStatus),
+        type: get(row, COL.propertyValueType) || undefined,
         required: parseBool(get(row, COL.propertyRequired)),
-        visibility: get(row, COL.propertyVisibility),
+        source: 'imported',
       };
       current.properties!.push(property);
     }

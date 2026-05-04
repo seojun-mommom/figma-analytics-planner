@@ -221,7 +221,9 @@ describe('parseAmplitudeCsv', () => {
   // ---------------------------------------------------------------------------
 
   describe('Property rows', () => {
-    it('attaches Event Property to the preceding event', () => {
+    it('attaches Event Property to the preceding event with imported metadata', () => {
+      // Imported properties keep name + type + required + source='imported'.
+      // Other CSV columns (description, schemaStatus, visibility) are dropped.
       const r = parseAmplitudeCsv(buildCsv(
         eventRow({ 2: 'my_event' }),
         propRow({ 21: 'user_id', 22: 'The user ID', 24: 'string', 25: 'LIVE', 26: 'TRUE', 27: 'PUBLIC' }),
@@ -229,11 +231,9 @@ describe('parseAmplitudeCsv', () => {
       expect(r.events[0].properties).toHaveLength(1);
       const p = r.events[0].properties![0];
       expect(p.name).toBe('user_id');
-      expect(p.description).toBe('The user ID');
-      expect(p.valueType).toBe('string');
-      expect(p.schemaStatus).toBe('LIVE');
+      expect(p.type).toBe('string');
       expect(p.required).toBe(true);
-      expect(p.visibility).toBe('PUBLIC');
+      expect(p.source).toBe('imported');
     });
 
     it('parses required=TRUE as true', () => {
@@ -258,6 +258,14 @@ describe('parseAmplitudeCsv', () => {
         propRow({ 21: 'p' }),
       ));
       expect(r.events[0].properties![0].required).toBe(false);
+    });
+
+    it('leaves type undefined when Property Value Type column is empty', () => {
+      const r = parseAmplitudeCsv(buildCsv(
+        eventRow({ 2: 'e' }),
+        propRow({ 21: 'p' }),
+      ));
+      expect(r.events[0].properties![0].type).toBeUndefined();
     });
 
     it('skips rows where Property Type is not "Event Property"', () => {
@@ -348,13 +356,13 @@ describe('parseAmplitudeCsv', () => {
       expect(btn.name).toBe('button_clicked');
       expect(btn.category).toBe('UI');
       expect(btn.properties).toHaveLength(2);
-      expect(btn.properties![0]).toMatchObject({ name: 'button_id', required: true });
-      expect(btn.properties![1]).toMatchObject({ name: 'page_url', required: false });
+      expect(btn.properties![0]).toMatchObject({ name: 'button_id' });
+      expect(btn.properties![1]).toMatchObject({ name: 'page_url' });
 
       expect(form.name).toBe('form_submitted');
       expect(form.category).toBe('Conversion');
       expect(form.properties).toHaveLength(1);
-      expect(form.properties![0]).toMatchObject({ name: 'form_id', required: true });
+      expect(form.properties![0]).toMatchObject({ name: 'form_id' });
     });
   });
 });

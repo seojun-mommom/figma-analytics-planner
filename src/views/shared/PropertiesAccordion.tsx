@@ -55,49 +55,54 @@ export function PropertiesAccordion({ properties }: Props): JSX.Element | null {
             gap: '4px',
           }}
         >
-          {properties.map((prop, i) => (
-            <div
-              key={i}
-              style={{
-                display: 'flex',
-                gap: '8px',
-                alignItems: 'baseline',
-                minWidth: 0,
-                fontSize: '12px',
-                lineHeight: 1.5,
-              }}
-            >
-              <span
+          {properties.map((prop, i) => {
+            // Only imported properties carry type/required from the source
+            // taxonomy — created-in-Add-Event properties are name-only.
+            const showTypeAndRequired = prop.source === 'imported' && typeof prop.type === 'string' && prop.type !== '';
+            return (
+              <div
+                key={i}
                 style={{
-                  fontWeight: 600,
-                  color: '#1a1a1a',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
+                  display: 'flex',
+                  gap: '8px',
+                  alignItems: 'baseline',
                   minWidth: 0,
+                  fontSize: '12px',
+                  lineHeight: 1.5,
                 }}
-                title={prop.name}
               >
-                {prop.name}
-              </span>
-              {prop.valueType !== '' && (
-                <span style={{ color: '#6b7280', flexShrink: 0 }}>
-                  {prop.valueType}
-                </span>
-              )}
-              {prop.required && (
                 <span
                   style={{
-                    color: 'rgb(217, 80, 80)',
                     fontWeight: 600,
-                    flexShrink: 0,
+                    color: '#1a1a1a',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    minWidth: 0,
                   }}
+                  title={prop.name}
                 >
-                  required
+                  {prop.name}
                 </span>
-              )}
-            </div>
-          ))}
+                {showTypeAndRequired && (
+                  <span style={{ color: '#6b7280', flexShrink: 0 }}>
+                    {prop.type}
+                  </span>
+                )}
+                {showTypeAndRequired && (
+                  prop.required === true ? (
+                    <span style={{ color: 'rgb(217, 80, 80)', fontWeight: 600, flexShrink: 0 }}>
+                      required
+                    </span>
+                  ) : (
+                    <span style={{ color: '#9ca3af', flexShrink: 0 }}>
+                      optional
+                    </span>
+                  )
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

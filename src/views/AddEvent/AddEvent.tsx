@@ -1,5 +1,5 @@
 /** @jsx h */
-import { Button, Text, Textbox, DropdownMenu } from '@create-figma-plugin/ui';
+import { Button, Textbox, DropdownMenu } from '@create-figma-plugin/ui';
 import { ComponentChildren, h, JSX } from 'preact';
 import { StateUpdater, useCallback, useEffect } from 'preact/hooks';
 import amplitude from 'amplitude-js';
@@ -33,14 +33,7 @@ const VISIBILITY_OPTIONS = [
   { value: Visibility.HIDDEN },
 ];
 
-const EMPTY_PROPERTY: EventProperty = {
-  name: '',
-  description: '',
-  valueType: '',
-  schemaStatus: '',
-  required: false,
-  visibility: '',
-};
+const EMPTY_PROPERTY: EventProperty = { name: '', source: 'created' };
 
 // ---------------------------------------------------------------------------
 // Shared style tokens
@@ -109,22 +102,6 @@ const S = {
     borderRadius: '3px',
     width: '100%',
     minWidth: '120px',
-  },
-  propertyCard: {
-    display: 'flex' as const,
-    flexDirection: 'column' as const,
-    padding: '12px',
-    marginBottom: '12px',
-    border: '1px solid var(--figma-color-border, #e5e5e5)',
-    borderRadius: '4px',
-    background: 'var(--figma-color-bg-secondary, #fafafa)',
-  },
-  propertyCardHeader: {
-    display: 'flex' as const,
-    flexDirection: 'row' as const,
-    justifyContent: 'space-between' as const,
-    alignItems: 'center' as const,
-    marginBottom: '12px',
   },
   footer: {
     padding: '12px 16px',
@@ -276,10 +253,12 @@ function AddEvent(props: Props): JSX.Element {
     }));
   }, [setEvent]);
 
-  const onPropertyChange = useCallback((index: number, field: keyof EventProperty, value: string | boolean) => {
+  const onPropertyNameChange = useCallback((index: number, value: string) => {
     setEvent(old => {
       const properties = [...(old.properties ?? [])];
-      properties[index] = { ...properties[index], [field]: value } as EventProperty;
+      // Preserve `source` (and any imported metadata) on edit so a user
+      // typo-fix on an imported property doesn't downgrade it to 'created'.
+      properties[index] = { ...properties[index], name: value };
       return { ...old, properties };
     });
   }, [setEvent]);
@@ -398,61 +377,72 @@ function AddEvent(props: Props): JSX.Element {
 
         {/* ─── PROPERTIES ─────────────────────────────────────── */}
 
-        <SectionHeader>Properties</SectionHeader>
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}>
-          <Button secondary onClick={onAddProperty}>+ Add property</Button>
+        <div style={{ ...S.sectionHeader, display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <span>Properties</span>
+          <button
+            type="button"
+            onClick={onAddProperty}
+            aria-label="Add property"
+            title="Add property"
+            style={{
+              width: '20px',
+              height: '20px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'transparent',
+              border: 'none',
+              color: BRAND,
+              fontSize: '18px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              padding: 0,
+              lineHeight: 1,
+            }}
+          >
+            +
+          </button>
         </div>
 
-        {properties.length === 0 && (
-          <div style={{ padding: '8px 0 16px 0' }}>
-            <Text muted>No properties yet. Click "Add property" to begin.</Text>
-          </div>
-        )}
-
         {properties.map((p, i) => (
-          <div key={i} style={S.propertyCard}>
-            <div style={S.propertyCardHeader}>
-              <Text bold>Property {i + 1}</Text>
-              <Button secondary onClick={(): void => onRemoveProperty(i)}>Remove</Button>
-            </div>
-
-            <Field label="Name">
+          <div key={i} style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '6px' }}>
+            <div style={{ flex: '1 1 auto', minWidth: 0 }}>
               <Textbox
                 name={`prop-name-${i}`}
                 value={p.name}
-                onChange={(s: { [key: string]: string }): void => onPropertyChange(i, 'name', s[`prop-name-${i}`] ?? '')}
-                placeholder="property_name"
+                onChange={(s: { [key: string]: string }): void => onPropertyNameChange(i, s[`prop-name-${i}`] ?? '')}
+                placeholder="Property name"
               />
-            </Field>
-
-            <Field label="Type">
-              <Textbox
-                name={`prop-type-${i}`}
-                value={p.valueType}
-                onChange={(s: { [key: string]: string }): void => onPropertyChange(i, 'valueType', s[`prop-type-${i}`] ?? '')}
-                placeholder="string, number, boolean, ..."
-              />
-            </Field>
-
-            <Field label="Status">
-              <Textbox
-                name={`prop-status-${i}`}
-                value={p.schemaStatus}
-                onChange={(s: { [key: string]: string }): void => onPropertyChange(i, 'schemaStatus', s[`prop-status-${i}`] ?? '')}
-                placeholder="LIVE, PROPOSED, ..."
-              />
-            </Field>
-
-            <label style={{ ...S.checkboxRow, marginBottom: 0 }}>
-              <input
-                type="checkbox"
-                checked={p.required}
-                onChange={(e: JSX.TargetedEvent<HTMLInputElement>): void => onPropertyChange(i, 'required', e.currentTarget.checked)}
-                style={{ margin: 0 }}
-              />
-              <span>Required</span>
-            </label>
+            </div>
+            <button
+              type="button"
+              onClick={(): void => onRemoveProperty(i)}
+              aria-label="Remove property"
+              title="Remove property"
+              style={{
+                flexShrink: 0,
+                width: '24px',
+                height: '24px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'transparent',
+                border: 'none',
+                color: '#9ca3af',
+                cursor: 'pointer',
+                padding: 0,
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="M2.5 4h11M6 4V2.5h4V4M4 4l.667 9.5a1 1 0 001 .92h4.666a1 1 0 001-.92L12 4M6.5 7v5M9.5 7v5"
+                  stroke="currentColor"
+                  stroke-width="1.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
           </div>
         ))}
 

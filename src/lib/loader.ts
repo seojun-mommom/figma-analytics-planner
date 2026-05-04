@@ -1,6 +1,14 @@
 import { EventMapping, EventMetadata, NodeMarker, PluginData } from 'src/types/event';
+import { Tab } from 'src/types/tab';
 
 export type EventMappings = Record<string, EventMapping[]>;
+
+// Picks the starting tab when the plugin is launched without a tab-specific
+// entry. Empty page → land on Import so first-time users see the on-ramp.
+// Otherwise → Overview.
+export function pickInitialTab(events: EventMetadata[]): Tab {
+  return events.length === 0 ? Tab.IMPORT_EVENTS : Tab.OVERVIEW;
+}
 
 export interface InitialData {
   initialApiKey: string;
@@ -122,6 +130,25 @@ export function loadEvents(): LoadedEvents {
       return null;
     }
   });
+
+  // Merge in events that have been created via Add Event but not yet mapped
+  // to a canvas node. These live in a page-scoped JSON list (see
+  // handlers.ts → UNMAPPED_EVENTS_KEY) and surface as events with no entries
+  // in `mappings`.
+  const unmappedRaw = figma.currentPage.getPluginData('unmappedEvents');
+  if (unmappedRaw.length > 0) {
+    try {
+      const unmapped = JSON.parse(unmappedRaw) as EventMetadata[];
+      if (Array.isArray(unmapped)) {
+        const seen = new Set(events.map((e) => e.name));
+        for (const u of unmapped) {
+          if (!seen.has(u.name)) events.push(u);
+        }
+      }
+    } catch {
+      // ignore — corrupt pluginData shouldn't break the loader
+    }
+  }
 
   return { events, mappings };
 }

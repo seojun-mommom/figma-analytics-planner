@@ -51,13 +51,23 @@
     ],
     "menu": [
       {
-        "name": "Create Event Label",
-        "main": "src/entries/addEvent.ts",
+        "name": "Overview",
+        "main": "src/entries/overview.ts",
         "ui": "src/views/ui.tsx"
       },
       {
-        "name": "View or Export Events",
+        "name": "All Events",
         "main": "src/entries/allEvents.ts",
+        "ui": "src/views/ui.tsx"
+      },
+      {
+        "name": "Import",
+        "main": "src/entries/importEvents.ts",
+        "ui": "src/views/ui.tsx"
+      },
+      {
+        "name": "Create Event",
+        "main": "src/entries/addEvent.ts",
         "ui": "src/views/ui.tsx"
       },
       {

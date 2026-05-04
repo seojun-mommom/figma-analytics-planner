@@ -10,13 +10,6 @@ const DETAIL_INNER_GAP = 2;
 const PROPERTIES_GAP = 2;
 const LABEL_FONT_SIZE = 10;
 const VALUE_FONT_SIZE = 12;
-const REQUIRED_PAINT: readonly SolidPaint[] = [{
-  blendMode: 'NORMAL',
-  color: { r: 217 / 255, g: 80 / 255, b: 80 / 255 },
-  opacity: 1,
-  type: 'SOLID',
-  visible: true,
-}];
 
 // Card dimensions. Cards have a fixed width on canvas — collapsed cards use
 // ellipsis on the name when it overflows, expanded cards keep the same width
@@ -83,31 +76,13 @@ function createDetailFrame(title: string, data: string): FrameNode {
   return container;
 }
 
-// Renders a single property as one TextNode like "age  any  required".
-// Using one node (not a horizontal frame of three) avoids truncation on
-// narrow cards: the text wraps as one block via textAutoResize='HEIGHT'.
-// Color differentiation for type and required is applied via setRangeFills.
+// Renders a single property line as just the property name. Type/required
+// are no longer tracked per property — those are applied at Amplitude-export
+// time with hardcoded defaults.
 function createPropertyLine(prop: EventProperty): TextNode {
-  const namePart = prop.name;
-  const typePart = prop.valueType !== '' ? `  ${prop.valueType}` : '';
-  const reqPart = prop.required ? '  required' : '';
-  const fullText = namePart + typePart + reqPart;
-
-  const node = createTextNode(fullText);
+  const node = createTextNode(prop.name);
   node.fontSize = VALUE_FONT_SIZE;
   node.layoutAlign = 'STRETCH';
-
-  if (typePart !== '') {
-    const start = namePart.length;
-    const end = start + typePart.length;
-    node.setRangeFills(start, end, [...COLORS.GRAY]);
-  }
-  if (reqPart !== '') {
-    const start = namePart.length + typePart.length;
-    const end = fullText.length;
-    node.setRangeFills(start, end, [...REQUIRED_PAINT]);
-  }
-
   return node;
 }
 

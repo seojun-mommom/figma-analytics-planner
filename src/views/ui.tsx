@@ -13,6 +13,7 @@ import { AMPLITUDE_API_KEY } from 'src/constants';
 import AddEvent from 'src/views/AddEvent/AddEvent';
 import AllEvents from 'src/views/AllEvents/AllEvents';
 import ImportEvents from 'src/views/ImportEvents/ImportEvents';
+import Overview from 'src/views/Overview/Overview';
 import Tutorial from 'src/views/Tutorial/Tutorial';
 
 type EventMappings = Record<string, EventMapping[]>;
@@ -174,7 +175,7 @@ function SelectionBanner({ selection }: { selection: SelectionInfo }): JSX.Eleme
 
 function Plugin (props: Props): JSX.Element {
   const {
-    initialTab = Tab.ADD_EVENT,
+    initialTab = Tab.OVERVIEW,
     initialEvents = [] as EventMetadata[],
     initialMappings = {} as EventMappings,
     initialNamesVisible = true,
@@ -232,7 +233,18 @@ function Plugin (props: Props): JSX.Element {
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
   }, []);
-  const [tab, setTab] = useState<Tab>(initialTab);
+  // First-launch routing: when the entry asks for Overview but the page has
+  // no events yet, redirect to Import so first-time users see the on-ramp.
+  // Explicit entries (Import, Create Event, etc.) are untouched.
+  const startTab = (initialTab === Tab.OVERVIEW && initialEvents.length === 0)
+    ? Tab.IMPORT_EVENTS
+    : initialTab;
+  const [tab, setTab] = useState<Tab>(startTab);
+  // Keep a ref of the active tab so async listeners (SELECTION_CHANGED) can
+  // make tab-aware decisions without becoming dependent on `tab` and tearing
+  // down their subscription on every switch.
+  const tabRef = useRef<Tab>(startTab);
+  useEffect(() => { tabRef.current = tab; }, [tab]);
   const [events, setEvents] = useState<EventMetadata[]>(initialEvents);
   const [mappings, setMappings] = useState<EventMappings>(initialMappings);
   const [expansion, setExpansion] = useState<ExpansionState>({});
@@ -266,8 +278,13 @@ function Plugin (props: Props): JSX.Element {
       // Only auto-focus the All Events list when the user actively clicked
       // a node on the canvas — not when the banner is being refreshed after
       // a Map/Add/Unmap action (those would otherwise hijack the search box
-      // immediately after the user pressed "Map to selection").
+      // immediately after the user pressed "Map to selection"). Skip the
+      // auto-switch entirely when the user is on Overview: clicking ↗ on a
+      // frame/node from Overview routes through FOCUS_NODE/NAVIGATE_TO_NODE,
+      // which sets the canvas selection — that should move the viewport, not
+      // yank them out of Overview.
       if (triggeredByUserSelection === true && info.mappedEvent !== null) {
+        if (tabRef.current === Tab.OVERVIEW) return;
         const eventName = info.mappedEvent.name;
         setPendingFocusEvent(eventName);
         setTab((current) => {
@@ -356,11 +373,24 @@ function Plugin (props: Props): JSX.Element {
     emit(Message.UNMAP_EVENT, { eventName, nodeId });
   }, []);
 
+  // Iterates the current mappings snapshot and emits UNMAP_EVENT for each
+  // (eventName, nodeId) pair. EVENT_UNMAPPED replies will trim ui.tsx's
+  // mapping state per-entry as Main reports successful removals.
+  const onClearAllMappings = useCallback(() => {
+    for (const [eventName, list] of Object.entries(mappings)) {
+      for (const m of list) {
+        emit(Message.UNMAP_EVENT, { eventName, nodeId: m.nodeId });
+      }
+    }
+  }, [mappings]);
+
   // Removes an event entry from the in-memory list. Only callable from the
   // All Events expanded row when nothing is mapped, so there is no canvas
-  // label to clean up — purely a state edit. Also clears any expansion /
-  // minimized flags for that event name.
+  // label to clean up. Still emits DELETE_EVENT so Main can drop the entry
+  // from the page-scoped unmapped-events store (otherwise it would reappear
+  // on next plugin open).
   const onDeleteEvent = useCallback((eventName: string) => {
+    emit(Message.DELETE_EVENT, eventName);
     setEvents((prev) => prev.filter((e) => e.name !== eventName));
     setExpansion((prev) => {
       if (!(eventName in prev)) return prev;
@@ -440,14 +470,25 @@ function Plugin (props: Props): JSX.Element {
     setPendingFocusEvent(null);
   }, []);
 
+  const onGoToAllEvents = useCallback(() => {
+    setTab((current) => {
+      if (current !== Tab.ALL_EVENTS) {
+        emit(Message.CHANGE_TAB, current, Tab.ALL_EVENTS);
+        return Tab.ALL_EVENTS;
+      }
+      return current;
+    });
+  }, []);
+
   const tabOptions = useMemo(() => {
     return [
+      { value: Tab.OVERVIEW, view: <Overview events={events} mappings={mappings} onUnmapEvent={onUnmapEvent} onFocusNode={onFocusNode} onNavigateToFrame={onNavigateToFrame} onGoToAllEvents={onGoToAllEvents} /> },
+      { value: Tab.ALL_EVENTS, view: <AllEvents events={events} mappings={mappings} onMapEvent={onMapEvent} onUnmapEvent={onUnmapEvent} onDeleteEvent={onDeleteEvent} labelsVisible={labelsVisible} onToggleLabelsVisible={onToggleLabelsVisible} namesVisible={namesVisible} onToggleNames={onToggleNames} onFocusNode={onFocusNode} onClearAllMappings={onClearAllMappings} expansion={expansion} onToggleExpansion={onToggleExpansion} pendingFocusEvent={pendingFocusEvent} onClearPendingFocus={onClearPendingFocus} /> },
+      { value: Tab.IMPORT_EVENTS, view: <ImportEvents onImport={onImportEvents} existingEvents={events} mappings={mappings} onMapEvent={onMapEvent} onUnmapEvent={onUnmapEvent} onFocusNode={onFocusNode} expansion={expansion} onToggleExpansion={onToggleExpansion} minimized={minimized} onToggleMinimized={onToggleMinimized} /> },
       { value: Tab.ADD_EVENT, view: <AddEvent event={eventInput} setEvent={setEventInput} onAddEvent={onAddEvent} existingEvents={events} /> },
-      { value: Tab.ALL_EVENTS, view: <AllEvents events={events} mappings={mappings} onMapEvent={onMapEvent} onUnmapEvent={onUnmapEvent} onDeleteEvent={onDeleteEvent} labelsVisible={labelsVisible} onToggleLabelsVisible={onToggleLabelsVisible} namesVisible={namesVisible} onToggleNames={onToggleNames} onFocusNode={onFocusNode} onNavigateToFrame={onNavigateToFrame} expansion={expansion} onToggleExpansion={onToggleExpansion} pendingFocusEvent={pendingFocusEvent} onClearPendingFocus={onClearPendingFocus} /> },
-      { value: Tab.IMPORT_EVENTS, view: <ImportEvents onImport={onImportEvents} mappings={mappings} onMapEvent={onMapEvent} onUnmapEvent={onUnmapEvent} onFocusNode={onFocusNode} expansion={expansion} onToggleExpansion={onToggleExpansion} minimized={minimized} onToggleMinimized={onToggleMinimized} /> },
       { value: Tab.TUTORIAL, view: <Tutorial /> }
     ];
-  }, [eventInput, onAddEvent, events, mappings, onMapEvent, onUnmapEvent, onDeleteEvent, onImportEvents, expansion, onToggleExpansion, minimized, onToggleMinimized, labelsVisible, onToggleLabelsVisible, namesVisible, onToggleNames, onFocusNode, onNavigateToFrame, pendingFocusEvent, onClearPendingFocus]);
+  }, [eventInput, onAddEvent, events, mappings, onMapEvent, onUnmapEvent, onDeleteEvent, onClearAllMappings, onImportEvents, expansion, onToggleExpansion, minimized, onToggleMinimized, labelsVisible, onToggleLabelsVisible, namesVisible, onToggleNames, onFocusNode, onNavigateToFrame, onGoToAllEvents, pendingFocusEvent, onClearPendingFocus]);
 
   return (
     <div style={{ position: 'relative', minHeight: '100vh' }}>

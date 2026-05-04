@@ -19,13 +19,16 @@ export enum SourceSdk {
   IOS = 'iOS SDK',
 }
 
+// Property origin matters at display time:
+//  - 'imported' properties come from a parsed Amplitude CSV and carry the
+//    original Value Type / Required flags from the source taxonomy.
+//  - 'created' properties were typed by the user in Add Event and only have
+//    a name; type & required will be filled in by Amplitude after export.
 export interface EventProperty {
   name: string;
-  description: string;
-  valueType: string;
-  schemaStatus: string;
-  required: boolean;
-  visibility: string;
+  type?: string;
+  required?: boolean;
+  source: 'imported' | 'created';
 }
 
 export interface EventMetadata {
@@ -74,7 +77,7 @@ export interface SelectionInfo {
 
 // Describes a single event-to-node mapping. screenName is the name of the
 // top-level Frame ancestor (page-direct child); frameId is that ancestor's
-// node id (used by Screen View to navigate the viewport to the frame);
+// node id (used by Tree view to navigate the viewport to the frame);
 // breadcrumb is the names from that ancestor down to the node, joined by " > ";
 // cardId uniquely identifies the canvas label group attached to this mapping
 // (stable across re-renders; stamped on the group + every descendant). May be

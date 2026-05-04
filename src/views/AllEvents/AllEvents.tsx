@@ -1,12 +1,14 @@
 /** @jsx h */
 import { Button, Container, Divider, VerticalSpace, Text } from '@create-figma-plugin/ui';
-import { ComponentChildren, h, JSX } from 'preact';
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
+import { ComponentChildren, Fragment, h, JSX } from 'preact';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import amplitude from 'amplitude-js';
 
 import { EventMapping, EventMetadata } from 'src/types/event';
 import { exportToCsv } from 'src/services/csv';
 import { PropertiesAccordion } from 'src/views/shared/PropertiesAccordion';
+import { Checkbox, CheckboxState } from 'src/views/shared/Checkbox';
+import { BrandButton } from 'src/views/shared/BrandButton';
 
 export interface Props {
   events: EventMetadata[];
@@ -19,7 +21,7 @@ export interface Props {
   namesVisible?: boolean;
   onToggleNames?: () => void;
   onFocusNode?: (nodeId: string) => void;
-  onNavigateToFrame?: (frameId: string) => void;
+  onClearAllMappings?: () => void;
   // Per-event canvas expansion state. ui.tsx owns the map and forwards a
   // toggle callback that fans out TOGGLE_CARD messages to every nodeId
   // mapped for the event.
@@ -33,7 +35,7 @@ export interface Props {
   onClearPendingFocus?: () => void;
 }
 
-type ViewMode = 'list' | 'screen';
+type FilterMode = 'all' | 'mapped' | 'unmapped';
 
 function hasValue(v: string | null | undefined): v is string {
   return typeof v === 'string' && v.trim().length > 0;
@@ -437,6 +439,9 @@ interface RowProps {
   open: boolean;
   onToggleOpen: () => void;
   highlighted?: boolean;
+  selectMode?: boolean;
+  selected?: boolean;
+  onToggleSelected?: () => void;
 }
 
 function CollapsibleRow({
@@ -451,6 +456,9 @@ function CollapsibleRow({
   open,
   onToggleOpen,
   highlighted = false,
+  selectMode = false,
+  selected = false,
+  onToggleSelected,
 }: RowProps): JSX.Element {
   const isMapped = mappedNodes.length > 0;
 
@@ -487,6 +495,13 @@ function CollapsibleRow({
           borderRadius: '3px',
         }}
       >
+        {selectMode && onToggleSelected !== undefined && (
+          <Checkbox
+            state={selected ? 'checked' : 'unchecked'}
+            onToggle={onToggleSelected}
+            ariaLabel={`Select ${event.name}`}
+          />
+        )}
         <span
           aria-hidden="true"
           style={{
@@ -532,353 +547,6 @@ function CollapsibleRow({
   );
 }
 
-interface ScreenGroup {
-  screenName: string;
-  // First non-empty frameId seen for this screen. Older mappings (pre-frameId)
-  // may have an empty string — those rows still group correctly by name, but
-  // the frame header navigation falls back to no-op until a frameId surfaces.
-  frameId: string;
-  rows: { event: EventMetadata; mapping: EventMapping }[];
-}
-
-function groupByScreen(events: EventMetadata[], mappings: Record<string, EventMapping[]>): ScreenGroup[] {
-  const order: string[] = [];
-  const lookup = new Map<string, ScreenGroup>();
-  for (const event of events) {
-    const eventMappings = mappings[event.name] ?? [];
-    for (const mapping of eventMappings) {
-      let group = lookup.get(mapping.screenName);
-      if (group === undefined) {
-        group = { screenName: mapping.screenName, frameId: mapping.frameId ?? '', rows: [] };
-        lookup.set(mapping.screenName, group);
-        order.push(mapping.screenName);
-      } else if (group.frameId.length === 0 && (mapping.frameId ?? '').length > 0) {
-        group.frameId = mapping.frameId;
-      }
-      group.rows.push({ event, mapping });
-    }
-  }
-  return order.map((name) => lookup.get(name) as ScreenGroup);
-}
-
-interface ScreenRowProps {
-  event: EventMetadata;
-  rowMapping: EventMapping;
-  allMappedNodes: EventMapping[];
-  onMap?: () => void;
-  onUnmap?: (nodeId: string) => void;
-  onFocusNode?: (nodeId: string) => void;
-  canvasExpanded?: boolean;
-  onToggleCanvasExpansion?: () => void;
-}
-
-function ScreenRow({
-  event,
-  rowMapping,
-  allMappedNodes,
-  onMap,
-  onUnmap,
-  onFocusNode,
-  canvasExpanded,
-  onToggleCanvasExpansion,
-}: ScreenRowProps): JSX.Element {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={(): void => setOpen((v) => !v)}
-        onKeyDown={(e: KeyboardEvent): void => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            setOpen((v) => !v);
-          }
-        }}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          width: '100%',
-          padding: '6px 4px 6px 18px',
-          minWidth: 0,
-          cursor: 'pointer',
-          borderBottom: '1px solid var(--figma-color-border, #f0f0f0)',
-          transition: 'background-color 0.12s ease',
-        }}
-        onMouseEnter={(e: JSX.TargetedMouseEvent<HTMLDivElement>): void => {
-          e.currentTarget.style.background = 'var(--figma-color-bg-hover, rgba(0,0,0,0.04))';
-        }}
-        onMouseLeave={(e: JSX.TargetedMouseEvent<HTMLDivElement>): void => {
-          e.currentTarget.style.background = 'transparent';
-        }}
-      >
-        <span
-          aria-hidden="true"
-          style={{
-            width: '10px',
-            flexShrink: 0,
-            color: 'var(--figma-color-text-secondary, #666)',
-            fontSize: '10px',
-          }}
-        >
-          {open ? '▼' : '▶'}
-        </span>
-        <span style={{ color: 'var(--figma-color-text-secondary, #999)', flexShrink: 0 }}>└──</span>
-        <span
-          style={{
-            fontWeight: 500,
-            fontSize: '12px',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            minWidth: 0,
-            flexShrink: 0,
-            maxWidth: '60%',
-          }}
-          title={event.name}
-        >
-          {event.name}
-        </span>
-        <span style={{ color: 'var(--figma-color-text-secondary, #999)', flexShrink: 0 }}>•</span>
-        <span
-          style={{
-            color: 'var(--figma-color-text-secondary, #666)',
-            fontSize: '12px',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            minWidth: 0,
-            flex: '1 1 auto',
-          }}
-          title={rowMapping.breadcrumb}
-        >
-          {rowMapping.nodeName}
-        </span>
-      </div>
-
-      {open && (
-        <EventDetails
-          event={event}
-          mappedNodes={allMappedNodes}
-          onMap={onMap}
-          onUnmap={onUnmap}
-          onFocusNode={onFocusNode}
-          canvasExpanded={canvasExpanded}
-          onToggleCanvasExpansion={onToggleCanvasExpansion}
-        />
-      )}
-    </div>
-  );
-}
-
-function rowMatchesSearch(event: EventMetadata, mapping: EventMapping, search: string): boolean {
-  if (search.length === 0) return true;
-  const q = search.toLowerCase();
-  if (event.name.toLowerCase().includes(q)) return true;
-  if (hasValue(event.description) && event.description.toLowerCase().includes(q)) return true;
-  if (hasValue(event.category) && event.category.toLowerCase().includes(q)) return true;
-  if (mapping.nodeName.toLowerCase().includes(q)) return true;
-  if (mapping.screenName.toLowerCase().includes(q)) return true;
-  return false;
-}
-
-interface ScreenViewProps {
-  events: EventMetadata[];
-  mappings: Record<string, EventMapping[]>;
-  search: string;
-  onMapEvent?: (event: EventMetadata) => void;
-  onUnmapEvent?: (eventName: string, nodeId: string) => void;
-  onFocusNode?: (nodeId: string) => void;
-  onNavigateToFrame?: (frameId: string) => void;
-  expansion: Record<string, boolean>;
-  onToggleExpansion?: (eventName: string) => void;
-}
-
-function ScreenView({
-  events,
-  mappings,
-  search,
-  onMapEvent,
-  onUnmapEvent,
-  onFocusNode,
-  onNavigateToFrame,
-  expansion,
-  onToggleExpansion,
-}: ScreenViewProps): JSX.Element {
-  const allGroups = useMemo(() => groupByScreen(events, mappings), [events, mappings]);
-  const groups = useMemo(() => {
-    if (search.length === 0) return allGroups;
-    return allGroups
-      .map((g) => ({
-        screenName: g.screenName,
-        frameId: g.frameId,
-        rows: g.rows.filter((r) => rowMatchesSearch(r.event, r.mapping, search)),
-      }))
-      .filter((g) => g.rows.length > 0);
-  }, [allGroups, search]);
-
-  if (allGroups.length === 0) {
-    return (
-      <div style={{ padding: '16px 4px' }}>
-        <Text muted>No mapped events yet. Map events to Figma elements from the List View.</Text>
-      </div>
-    );
-  }
-
-  if (groups.length === 0) {
-    return (
-      <div style={{ padding: '16px 4px' }}>
-        <Text muted>No mapped events match your search.</Text>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, padding: '8px 4px 16px 4px' }}>
-      {groups.map((group) => {
-        const navigate: (() => void) | undefined =
-          onNavigateToFrame !== undefined && group.frameId.length > 0
-            ? (): void => onNavigateToFrame(group.frameId)
-            : undefined;
-        const navigable = navigate !== undefined;
-        return (
-        <div key={group.screenName} style={{ marginBottom: '12px', minWidth: 0 }}>
-          <div
-            role={navigable ? 'button' : undefined}
-            tabIndex={navigable ? 0 : undefined}
-            onClick={navigate}
-            onKeyDown={navigate !== undefined
-              ? (e: KeyboardEvent): void => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    navigate();
-                  }
-                }
-              : undefined}
-            onMouseEnter={navigable
-              ? (e: JSX.TargetedMouseEvent<HTMLDivElement>): void => {
-                  e.currentTarget.style.background = '#FFF3E8';
-                }
-              : undefined}
-            onMouseLeave={navigable
-              ? (e: JSX.TargetedMouseEvent<HTMLDivElement>): void => {
-                  e.currentTarget.style.background = 'transparent';
-                }
-              : undefined}
-            style={{
-              display: 'flex',
-              alignItems: 'baseline',
-              gap: '6px',
-              padding: '6px 4px',
-              borderBottom: '1px solid var(--figma-color-border, #e5e5e5)',
-              minWidth: 0,
-              cursor: navigable ? 'pointer' : 'default',
-              background: 'transparent',
-              transition: 'background-color 0.12s ease',
-              borderRadius: 3,
-            }}
-            title={navigable ? `Go to ${group.screenName}` : group.screenName}
-          >
-            <span style={{ fontSize: '13px', flexShrink: 0 }}>📱</span>
-            <span
-              style={{
-                fontWeight: 600,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                minWidth: 0,
-                flex: '1 1 auto',
-              }}
-            >
-              {group.screenName}
-            </span>
-            <span style={{ fontSize: '11px', color: 'var(--figma-color-text-secondary, #666)', flexShrink: 0 }}>
-              {group.rows.length}
-            </span>
-            {navigable && (
-              <span
-                aria-hidden="true"
-                style={{
-                  fontSize: '11px',
-                  color: '#FE6E12',
-                  flexShrink: 0,
-                  fontWeight: 600,
-                }}
-              >
-                ↗
-              </span>
-            )}
-          </div>
-          {group.rows.map((row, i) => (
-            <ScreenRow
-              key={`${row.mapping.nodeId}-${i}`}
-              event={row.event}
-              rowMapping={row.mapping}
-              allMappedNodes={mappings[row.event.name] ?? []}
-              onMap={onMapEvent !== undefined ? (): void => onMapEvent(row.event) : undefined}
-              onUnmap={onUnmapEvent !== undefined ? (nodeId: string): void => onUnmapEvent(row.event.name, nodeId) : undefined}
-              onFocusNode={onFocusNode}
-              canvasExpanded={expansion[row.event.name] ?? false}
-              onToggleCanvasExpansion={onToggleExpansion !== undefined ? (): void => onToggleExpansion(row.event.name) : undefined}
-            />
-          ))}
-        </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function ViewModeToggle({ mode, onChange }: { mode: ViewMode; onChange: (m: ViewMode) => void }): JSX.Element {
-  const baseBtn = {
-    flex: '1 1 0%',
-    padding: '6px 8px',
-    fontSize: '11px',
-    fontWeight: 500 as const,
-    cursor: 'pointer',
-    border: '1px solid #e5e7eb',
-    background: '#ffffff',
-    color: '#1a1a1a',
-  };
-  const selected = {
-    background: 'rgba(254, 110, 18, 0.08)',
-    border: '1px solid #FE6E12',
-    color: '#FE6E12',
-    fontWeight: 600 as const,
-  };
-  return (
-    <div style={{ display: 'flex', flexDirection: 'row', minWidth: 0, padding: '8px 4px 0 4px' }}>
-      <button
-        type="button"
-        onClick={(): void => onChange('list')}
-        style={{
-          ...baseBtn,
-          borderTopLeftRadius: '3px',
-          borderBottomLeftRadius: '3px',
-          borderRight: 'none',
-          ...(mode === 'list' ? selected : {}),
-        }}
-      >
-        List View
-      </button>
-      <button
-        type="button"
-        onClick={(): void => onChange('screen')}
-        style={{
-          ...baseBtn,
-          borderTopRightRadius: '3px',
-          borderBottomRightRadius: '3px',
-          ...(mode === 'screen' ? selected : {}),
-        }}
-      >
-        Screen View
-      </button>
-    </div>
-  );
-}
-
 function SearchInput({ value, onChange }: { value: string; onChange: (v: string) => void }): JSX.Element {
   return (
     <div style={{ padding: '8px 4px 4px 4px', minWidth: 0 }}>
@@ -909,6 +577,284 @@ function SearchInput({ value, onChange }: { value: string; onChange: (v: string)
   );
 }
 
+function FilterChips({
+  mode,
+  onChange,
+  counts,
+}: {
+  mode: FilterMode;
+  onChange: (m: FilterMode) => void;
+  counts: { all: number; mapped: number; unmapped: number };
+}): JSX.Element {
+  const chip = (label: string, value: FilterMode, count: number): JSX.Element => {
+    const selected = mode === value;
+    return (
+      <button
+        type="button"
+        onClick={(): void => onChange(value)}
+        style={{
+          padding: '4px 12px',
+          fontSize: '11px',
+          fontWeight: selected ? 600 : 500,
+          lineHeight: 1.4,
+          border: '1px solid',
+          borderColor: selected ? '#FE6E12' : '#e5e7eb',
+          borderRadius: '16px',
+          background: selected ? '#FE6E12' : '#ffffff',
+          color: selected ? '#ffffff' : '#6b7280',
+          cursor: 'pointer',
+          flexShrink: 0,
+        }}
+      >
+        {label} ({count})
+      </button>
+    );
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'row', gap: '6px', padding: '4px 4px 8px 4px', minWidth: 0, flexWrap: 'wrap' }}>
+      {chip('All', 'all', counts.all)}
+      {chip('Mapped', 'mapped', counts.mapped)}
+      {chip('Unmapped', 'unmapped', counts.unmapped)}
+    </div>
+  );
+}
+
+interface SettingsMenuProps {
+  open: boolean;
+  onClose: () => void;
+  labelsVisible: boolean;
+  onToggleLabelsVisible?: () => void;
+  namesVisible: boolean;
+  onToggleNames?: () => void;
+  onClearAllMappings?: () => void;
+  selectMode: boolean;
+  onToggleSelectMode: () => void;
+}
+
+function SettingsMenu({
+  open,
+  onClose,
+  labelsVisible,
+  onToggleLabelsVisible,
+  namesVisible,
+  onToggleNames,
+  onClearAllMappings,
+  selectMode,
+  onToggleSelectMode,
+}: SettingsMenuProps): JSX.Element | null {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (e: MouseEvent): void => {
+      if (ref.current !== null && !ref.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    // Defer attachment to the next tick so the click that opened the menu
+    // doesn't immediately close it.
+    const id = window.setTimeout(() => {
+      document.addEventListener('mousedown', handleClick);
+    }, 0);
+    return () => {
+      window.clearTimeout(id);
+      document.removeEventListener('mousedown', handleClick);
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const itemBase = {
+    display: 'block',
+    width: '100%',
+    padding: '8px 12px',
+    fontSize: '12px',
+    textAlign: 'left' as const,
+    background: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    color: '#1a1a1a',
+    lineHeight: 1.4,
+  };
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        position: 'absolute',
+        bottom: '48px',
+        left: 0,
+        background: '#ffffff',
+        border: '1px solid #e5e7eb',
+        borderRadius: '8px',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+        minWidth: '200px',
+        padding: '4px 0',
+        zIndex: 20,
+      }}
+    >
+      <button
+        type="button"
+        onClick={(): void => {
+          onToggleSelectMode();
+          onClose();
+        }}
+        onMouseEnter={(e: JSX.TargetedMouseEvent<HTMLButtonElement>): void => {
+          e.currentTarget.style.background = '#f9fafb';
+        }}
+        onMouseLeave={(e: JSX.TargetedMouseEvent<HTMLButtonElement>): void => {
+          e.currentTarget.style.background = 'transparent';
+        }}
+        style={itemBase}
+      >
+        {selectMode ? 'Exit Selection Mode' : 'Select to Export'}
+      </button>
+      {(onToggleLabelsVisible !== undefined || onToggleNames !== undefined) && (
+        <div style={{ height: '1px', background: '#e5e7eb', margin: '4px 0' }} />
+      )}
+      {onToggleLabelsVisible !== undefined && (
+        <button
+          type="button"
+          onClick={(): void => {
+            onToggleLabelsVisible();
+            onClose();
+          }}
+          onMouseEnter={(e: JSX.TargetedMouseEvent<HTMLButtonElement>): void => {
+            e.currentTarget.style.background = '#f9fafb';
+          }}
+          onMouseLeave={(e: JSX.TargetedMouseEvent<HTMLButtonElement>): void => {
+            e.currentTarget.style.background = 'transparent';
+          }}
+          style={itemBase}
+        >
+          {labelsVisible ? 'Hide All Labels' : 'Show All Labels'}
+        </button>
+      )}
+      {onToggleNames !== undefined && (
+        <button
+          type="button"
+          onClick={(): void => {
+            onToggleNames();
+            onClose();
+          }}
+          onMouseEnter={(e: JSX.TargetedMouseEvent<HTMLButtonElement>): void => {
+            e.currentTarget.style.background = '#f9fafb';
+          }}
+          onMouseLeave={(e: JSX.TargetedMouseEvent<HTMLButtonElement>): void => {
+            e.currentTarget.style.background = 'transparent';
+          }}
+          style={itemBase}
+        >
+          {namesVisible ? 'Hide Names' : 'Show Names'}
+        </button>
+      )}
+      {onClearAllMappings !== undefined && (
+        <Fragment>
+          <div style={{ height: '1px', background: '#e5e7eb', margin: '4px 0' }} />
+          <button
+            type="button"
+            onClick={(): void => {
+              onClearAllMappings();
+              onClose();
+            }}
+            onMouseEnter={(e: JSX.TargetedMouseEvent<HTMLButtonElement>): void => {
+              e.currentTarget.style.background = 'rgba(217, 80, 80, 0.08)';
+            }}
+            onMouseLeave={(e: JSX.TargetedMouseEvent<HTMLButtonElement>): void => {
+              e.currentTarget.style.background = 'transparent';
+            }}
+            style={{ ...itemBase, color: '#d95050' }}
+          >
+            Clear All Mappings
+          </button>
+        </Fragment>
+      )}
+    </div>
+  );
+}
+
+function ConfirmDialog({
+  message,
+  confirmLabel,
+  onConfirm,
+  onCancel,
+}: {
+  message: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}): JSX.Element {
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'rgba(0,0,0,0.35)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 50,
+      }}
+      onClick={onCancel}
+    >
+      <div
+        onClick={(e: JSX.TargetedMouseEvent<HTMLDivElement>): void => e.stopPropagation()}
+        style={{
+          background: '#ffffff',
+          border: '1px solid #e5e7eb',
+          borderRadius: '8px',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
+          padding: '16px',
+          minWidth: '280px',
+          maxWidth: '360px',
+        }}
+      >
+        <div style={{ fontSize: '13px', color: '#1a1a1a', lineHeight: 1.5, marginBottom: '12px' }}>
+          {message}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'flex-end', gap: '8px' }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            style={{
+              padding: '6px 12px',
+              fontSize: '12px',
+              fontWeight: 500,
+              background: '#ffffff',
+              color: '#1a1a1a',
+              border: '1px solid #e5e7eb',
+              borderRadius: '3px',
+              cursor: 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            style={{
+              padding: '6px 12px',
+              fontSize: '12px',
+              fontWeight: 600,
+              background: '#d95050',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '3px',
+              cursor: 'pointer',
+            }}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AllEvents({
   events,
   mappings = {},
@@ -920,14 +866,18 @@ function AllEvents({
   namesVisible = true,
   onToggleNames,
   onFocusNode,
-  onNavigateToFrame,
+  onClearAllMappings,
   expansion = {},
   onToggleExpansion,
   pendingFocusEvent = null,
   onClearPendingFocus,
 }: Props): JSX.Element {
-  const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [search, setSearch] = useState('');
+  const [filterMode, setFilterMode] = useState<FilterMode>('all');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [selectMode, setSelectMode] = useState<boolean>(false);
+  const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set());
   // Lifted out of CollapsibleRow so we can programmatically expand the row
   // that matches the current canvas selection.
   const [openRows, setOpenRows] = useState<Record<string, boolean>>({});
@@ -942,15 +892,14 @@ function AllEvents({
   }, []);
 
   // Reacts to ui.tsx's pendingFocusEvent: type the event name into the
-  // search input (which filters the list down to that one row), force list
-  // view, and auto-expand the matching row. Then notify ui.tsx that we've
-  // consumed the focus so a re-selection of the same canvas card re-fires
-  // the effect.
+  // search input (which filters the list down to that one row) and
+  // auto-expand the matching row. Filter chip is reset to 'all' so the
+  // event is guaranteed to be visible regardless of mapped state.
   useEffect(() => {
     if (pendingFocusEvent === null) return;
     const name = pendingFocusEvent;
     setSearch(name);
-    setViewMode('list');
+    setFilterMode('all');
     setOpenRows((prev) => ({ ...prev, [name]: true }));
     setHighlightedName(name);
     onClearPendingFocus?.();
@@ -964,27 +913,104 @@ function AllEvents({
     return () => window.clearTimeout(id);
   }, [highlightedName]);
 
-  const filteredEvents = useMemo(
-    () => events.filter((e) => matchesSearch(e, mappings[e.name] ?? [], search)),
-    [events, mappings, search]
-  );
+  const counts = useMemo(() => {
+    let mapped = 0;
+    for (const e of events) {
+      if ((mappings[e.name] ?? []).length > 0) mapped++;
+    }
+    return { all: events.length, mapped, unmapped: events.length - mapped };
+  }, [events, mappings]);
 
-  const onClickCsvExport = (): void => {
-    const eventsCsv = events.map((event) => ({
-      Event: event.name,
-      Trigger: event.trigger,
-      'Event Description': event.description,
-      'Dev Notes': event.notes,
-    }));
-    amplitude.logEvent('Export to CSV clicked');
-    exportToCsv('taxonomy.csv', [...eventsCsv]);
+  const filteredEvents = useMemo(() => {
+    return events.filter((e) => {
+      const m = mappings[e.name] ?? [];
+      const isMapped = m.length > 0;
+      if (filterMode === 'mapped' && !isMapped) return false;
+      if (filterMode === 'unmapped' && isMapped) return false;
+      return matchesSearch(e, m, search);
+    });
+  }, [events, mappings, search, filterMode]);
+
+  // Drop selections that no longer correspond to a known event (e.g. after
+  // a Delete) so the export count and Select All toggle stay accurate.
+  useEffect(() => {
+    setSelectedNames((prev) => {
+      if (prev.size === 0) return prev;
+      const valid = new Set(events.map((e) => e.name));
+      let changed = false;
+      const next = new Set<string>();
+      for (const n of prev) {
+        if (valid.has(n)) next.add(n);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [events]);
+
+  const onToggleSelectMode = useCallback(() => {
+    setSelectMode((prev) => {
+      const next = !prev;
+      // Exiting selection mode clears the selection so the hidden state can't
+      // silently affect the next export.
+      if (!next) setSelectedNames(new Set());
+      return next;
+    });
+  }, []);
+
+  const onToggleSelectName = useCallback((name: string) => {
+    setSelectedNames((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }, []);
+
+  const onSelectAllVisible = useCallback(() => {
+    setSelectedNames(new Set(filteredEvents.map((e) => e.name)));
+  }, [filteredEvents]);
+
+  const onDeselectAll = useCallback(() => {
+    setSelectedNames(new Set());
+  }, []);
+
+  const selectedExportableEvents = events.filter((e) => selectedNames.has(e.name));
+  const selectionExportLabel = `Export (${selectedNames.size})`;
+
+  // Tri-state for the bulk-select checkbox in the Select-mode bottom bar.
+  // Computed against the visible (filtered) list so toggling never touches
+  // events the user has filtered out.
+  let selectAllState: CheckboxState = 'unchecked';
+  if (selectedNames.size > 0) {
+    selectAllState = filteredEvents.length > 0 && filteredEvents.every((e) => selectedNames.has(e.name))
+      ? 'checked'
+      : 'indeterminate';
+  }
+  const onToggleSelectAll = (): void => {
+    if (selectAllState === 'checked') onDeselectAll();
+    else onSelectAllVisible();
+  };
+
+  // Sole export path. Select-mode "Export (N)" → Amplitude Taxonomy CSV
+  // (the same 29-column format produced by services/csv.ts → exportToCsv,
+  // which the parser can round-trip).
+  const onExportSelected = (): void => {
+    if (selectedExportableEvents.length === 0) return;
+    amplitude.logEvent('Export to CSV clicked', {
+      mode: 'selection',
+      count: selectedExportableEvents.length,
+    });
+    exportToCsv('amplitude-taxonomy.csv', selectedExportableEvents);
+    // Auto-exit selection mode after export so the next session starts fresh;
+    // onToggleSelectMode also clears selectedNames.
+    onToggleSelectMode();
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1, height: '89%', minHeight: 0 }}>
       <div style={{ flexShrink: 0 }}>
-        <ViewModeToggle mode={viewMode} onChange={setViewMode} />
         <SearchInput value={search} onChange={setSearch} />
+        <FilterChips mode={filterMode} onChange={setFilterMode} counts={counts} />
       </div>
       <Container
         style={{
@@ -997,70 +1023,113 @@ function AllEvents({
           padding: 0,
         }}
       >
-        {viewMode === 'list' ? (
-          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, padding: '4px 4px 16px 4px' }}>
-            {events.length === 0 && (
-              <div style={{ padding: '16px 4px' }}>
-                <Text muted>No events yet. Add or import events to get started.</Text>
-              </div>
-            )}
-            {events.length > 0 && filteredEvents.length === 0 && (
-              <div style={{ padding: '16px 4px' }}>
-                <Text muted>No events match your search.</Text>
-              </div>
-            )}
-            {filteredEvents.map((event, i) => (
-              <CollapsibleRow
-                key={`${event.name}-${i}`}
-                event={event}
-                mappedNodes={mappings[event.name] ?? []}
-                onMap={onMapEvent !== undefined ? (): void => onMapEvent(event) : undefined}
-                onUnmap={onUnmapEvent !== undefined ? (nodeId: string): void => onUnmapEvent(event.name, nodeId) : undefined}
-                onDelete={onDeleteEvent !== undefined ? (): void => onDeleteEvent(event.name) : undefined}
-                onFocusNode={onFocusNode}
-                canvasExpanded={expansion[event.name] ?? false}
-                onToggleCanvasExpansion={onToggleExpansion !== undefined ? (): void => onToggleExpansion(event.name) : undefined}
-                open={openRows[event.name] ?? false}
-                onToggleOpen={(): void => toggleRow(event.name)}
-                highlighted={highlightedName === event.name}
-              />
-            ))}
-          </div>
-        ) : (
-          <ScreenView
-            events={events}
-            mappings={mappings}
-            search={search}
-            onMapEvent={onMapEvent}
-            onUnmapEvent={onUnmapEvent}
-            onFocusNode={onFocusNode}
-            onNavigateToFrame={onNavigateToFrame}
-            expansion={expansion}
-            onToggleExpansion={onToggleExpansion}
-          />
-        )}
+        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, padding: '4px 4px 16px 4px' }}>
+          {events.length === 0 && (
+            <div style={{ padding: '16px 4px' }}>
+              <Text muted>No events yet. Add or import events to get started.</Text>
+            </div>
+          )}
+          {events.length > 0 && filteredEvents.length === 0 && (
+            <div style={{ padding: '16px 4px' }}>
+              <Text muted>No events match your filters.</Text>
+            </div>
+          )}
+          {filteredEvents.map((event, i) => (
+            <CollapsibleRow
+              key={`${event.name}-${i}`}
+              event={event}
+              mappedNodes={mappings[event.name] ?? []}
+              onMap={onMapEvent !== undefined ? (): void => onMapEvent(event) : undefined}
+              onUnmap={onUnmapEvent !== undefined ? (nodeId: string): void => onUnmapEvent(event.name, nodeId) : undefined}
+              onDelete={onDeleteEvent !== undefined ? (): void => onDeleteEvent(event.name) : undefined}
+              onFocusNode={onFocusNode}
+              canvasExpanded={expansion[event.name] ?? false}
+              onToggleCanvasExpansion={onToggleExpansion !== undefined ? (): void => onToggleExpansion(event.name) : undefined}
+              open={openRows[event.name] ?? false}
+              onToggleOpen={(): void => toggleRow(event.name)}
+              highlighted={highlightedName === event.name}
+              selectMode={selectMode}
+              selected={selectedNames.has(event.name)}
+              onToggleSelected={(): void => onToggleSelectName(event.name)}
+            />
+          ))}
+        </div>
       </Container>
 
       <Divider />
       <VerticalSpace />
-      <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', gap: '8px' }}>
-        <div style={{ display: 'flex', flexDirection: 'row', gap: '6px' }}>
-          {onToggleLabelsVisible !== undefined && (
-            <Button onClick={onToggleLabelsVisible} secondary>
-              {labelsVisible ? 'Hide All Labels' : 'Show All Labels'}
-            </Button>
-          )}
-          {onToggleNames !== undefined && (
-            <Button onClick={onToggleNames} secondary>
-              {namesVisible ? 'Hide Names' : 'Show Names'}
-            </Button>
-          )}
-        </div>
-        <Button onClick={onClickCsvExport} disabled={events.length === 0}>
-          Export to CSV
-        </Button>
+      <div
+        style={{
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          width: '100%',
+          gap: '8px',
+        }}
+      >
+        {selectMode ? (
+          <Fragment>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+              <Checkbox
+                state={selectAllState}
+                onToggle={onToggleSelectAll}
+                ariaLabel={selectAllState === 'checked' ? 'Deselect all' : 'Select all'}
+              />
+              <span style={{ color: '#6b7280', fontSize: '12px' }}>{selectedNames.size} selected</span>
+            </div>
+            <BrandButton onClick={onExportSelected} disabled={selectedNames.size === 0}>
+              {selectionExportLabel}
+            </BrandButton>
+          </Fragment>
+        ) : (
+          <Fragment>
+            <button
+              type="button"
+              aria-label="Settings"
+              title="Settings"
+              onClick={(): void => setSettingsOpen((v) => !v)}
+              style={{
+                padding: '6px 10px',
+                background: '#ffffff',
+                color: '#1a1a1a',
+                border: '1px solid #e5e7eb',
+                borderRadius: '3px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                lineHeight: 1,
+              }}
+            >
+              ⚙️
+            </button>
+            <SettingsMenu
+              open={settingsOpen}
+              onClose={(): void => setSettingsOpen(false)}
+              labelsVisible={labelsVisible}
+              onToggleLabelsVisible={onToggleLabelsVisible}
+              namesVisible={namesVisible}
+              onToggleNames={onToggleNames}
+              onClearAllMappings={onClearAllMappings !== undefined ? (): void => setConfirmClear(true) : undefined}
+              selectMode={selectMode}
+              onToggleSelectMode={onToggleSelectMode}
+            />
+          </Fragment>
+        )}
       </div>
       <VerticalSpace space="small" />
+
+      {confirmClear && (
+        <ConfirmDialog
+          message="Are you sure? This will remove all mappings."
+          confirmLabel="Clear All"
+          onCancel={(): void => setConfirmClear(false)}
+          onConfirm={(): void => {
+            setConfirmClear(false);
+            onClearAllMappings?.();
+          }}
+        />
+      )}
     </div>
   );
 }

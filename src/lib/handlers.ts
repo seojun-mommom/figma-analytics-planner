@@ -5,6 +5,38 @@ import { findLabelsForEvent, buildMappingForNode } from 'src/lib/loader';
 import { EventMetadata, PluginData, SelectionInfo, Trigger } from 'src/types/event';
 import { Message } from 'src/types/message';
 
+// Page-scoped JSON list of events that exist in the UI but have not yet been
+// bound to any canvas node. ADD_EVENT writes here; MAP_EVENT removes from here
+// (the event then lives in the canvas label group); DELETE_EVENT removes too.
+const UNMAPPED_EVENTS_KEY = 'unmappedEvents';
+
+function readUnmappedEvents(): EventMetadata[] {
+  const raw = figma.currentPage.getPluginData(UNMAPPED_EVENTS_KEY);
+  if (raw.length === 0) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as EventMetadata[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeUnmappedEvents(list: EventMetadata[]): void {
+  figma.currentPage.setPluginData(UNMAPPED_EVENTS_KEY, list.length === 0 ? '' : JSON.stringify(list));
+}
+
+function upsertUnmappedEvent(event: EventMetadata): void {
+  const list = readUnmappedEvents().filter((e) => e.name !== event.name);
+  list.push(event);
+  writeUnmappedEvents(list);
+}
+
+function removeUnmappedEvent(name: string): void {
+  const list = readUnmappedEvents();
+  const next = list.filter((e) => e.name !== name);
+  if (next.length !== list.length) writeUnmappedEvents(next);
+}
+
 // Looks up the full EventMetadata from the Amplitude Event Labels group by
 // matching the label group whose 'eventData' has the given name. Used to
 // resolve a leaf node's 'cardEventName' marker into a full event object.
@@ -106,21 +138,11 @@ function emitSelection(triggeredByUserSelection: boolean = false): void {
 
 export function attachHandlers(): void {
   on(Message.ADD_EVENT, (event: EventMetadata) => {
-    if (figma.currentPage.selection.length === 0) {
-      figma.notify('Please select an element');
-    } else if (figma.currentPage.selection.length > 1) {
-      figma.notify('Please group multiple elements into a single frame');
-    } else {
-      const node = figma.currentPage.selection[0];
-      createLabel(event, node).then(
-        (cardId) => {
-          figma.notify(`✔️ Event '${event.name}' added!`);
-          emit(Message.EVENT_MAPPED, { eventName: event.name, mapping: buildMappingForNode(node, cardId) });
-          emitSelection(); // selection's mapped event may have changed
-        },
-        () => figma.notify(`✗ Issue creating event: '${event.name}'`)
-      );
-    }
+    // Create Event persists the event without mapping it — no canvas card,
+    // no clientNodeId, no EVENT_MAPPED emission. The user maps later from
+    // All Events via the explicit Map button (MAP_EVENT handler below).
+    upsertUnmappedEvent(event);
+    figma.notify(`✔️ Event '${event.name}' created`);
   });
 
   on(Message.TOGGLE_CARD, (payload: { cardId: string; isExpanded: boolean }) => {
@@ -159,12 +181,21 @@ export function attachHandlers(): void {
     const node = figma.currentPage.selection[0];
     createLabel(event, node).then(
       (cardId) => {
+        // The event now lives in the canvas label group's pluginData; drop
+        // its entry from the unmapped store so loader.ts doesn't double-list.
+        removeUnmappedEvent(event.name);
         figma.notify(`✔️ Mapped to ${node.name}`);
         emit(Message.EVENT_MAPPED, { eventName: event.name, mapping: buildMappingForNode(node, cardId) });
         emitSelection();
       },
       () => figma.notify(`✗ Issue mapping event: '${event.name}'`)
     );
+  });
+
+  on(Message.DELETE_EVENT, (eventName: string) => {
+    // Mapped-event deletion is gated on the UI side (only allowed when no
+    // mappings exist), so this purely cleans up the unmapped store.
+    removeUnmappedEvent(eventName);
   });
 
   on(Message.UNMAP_EVENT, (payload: { eventName: string; nodeId: string }) => {
